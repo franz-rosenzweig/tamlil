@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Tamlil</title>
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/fonts.css">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="top">
+  <a class="mark" href="#/search">Tamlil <span lang="he" dir="rtl">תמליל</span></a>
+  <nav>
+    <a href="#/search" data-nav="search">Search</a>
+    <a href="#/library" data-nav="library">Library</a>
+  </nav>
+  <span class="worker" id="worker" title="Worker"></span>
+  <span class="me mono muted" id="me" hidden></span>
+  <button class="icon" id="signout" title="Sign out" aria-label="Sign out" hidden>⏻</button>
+</header>
+<main id="main"></main>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

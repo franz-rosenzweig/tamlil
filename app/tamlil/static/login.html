@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Tamlil</title>
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/fonts.css">
+<link rel="stylesheet" href="/static/app.css">
+<style>
+  .gate{min-height:100vh;display:grid;place-items:center;padding:16px}
+  .gate form{display:grid;gap:14px;width:min(340px,100%);background:var(--surface);border:1px solid var(--rule);border-radius:14px;padding:26px 24px}
+  .gate .mark{justify-content:center;font-size:26px;margin-bottom:6px}
+  .gate input{font-size:17px;padding:11px 14px}
+  .gate #code{font:600 22px var(--f-mono);letter-spacing:.18em;text-align:center}
+  .gate .to{display:flex;align-items:center;justify-content:center;gap:6px;margin:-4px 0 0;color:var(--muted);font:500 14px var(--f-mono)}
+  .gate .again{justify-self:center;font-size:14px;color:var(--muted)}
+  .gate .err{color:var(--bad);font-size:14px;min-height:1.2em;margin:0;text-align:center}
+  .gate [hidden]{display:none}
+</style>
+</head>
+<body>
+<main class="gate">
+  <form id="ask">
+    <div class="mark">Tamlil <span lang="he" dir="rtl">תמליל</span></div>
+    <input type="text" id="who" autocomplete="username" inputmode="email" autocapitalize="none" spellcheck="false" placeholder="Email or username" aria-label="Email or username" required autofocus>
+    <button class="btn primary" type="submit">Send code</button>
+    <p class="err" role="alert"></p>
+  </form>
+  <form id="back" hidden>
+    <div class="mark">Tamlil <span lang="he" dir="rtl">תמליל</span></div>
+    <p class="to"><button class="icon" type="button" id="change" title="Back" aria-label="Back">←</button><span id="to"></span></p>
+    <input type="text" id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="000 000" aria-label="Code" required>
+    <input type="text" id="username" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="32" placeholder="Pick a username" aria-label="Username" title="2–32: a–z, 0–9, . _ -" hidden>
+    <button class="btn primary" type="submit">Sign in</button>
+    <button class="linkish again" type="button" id="again">Send again</button>
+    <p class="err" role="alert"></p>
+  </form>
+</main>
+<script>
+(() => {
+const $ = s => document.querySelector(s);
+const SAY = {
+  'not-on-list': 'Not on the list', throttled: 'Too many tries. Wait a bit.', mail: "Couldn't send the email",
+  wrong: 'Wrong code', expired: 'Code expired', taken: 'Username taken', username: '2–32: a–z, 0–9, . _ -',
+  'need-username': 'Pick a username',
+};
+let who = '';
+try { $('#who').value = localStorage.getItem('tamlil-who') || ''; } catch {}
+
+async function post(path, body) {
+  const r = await fetch(path, {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify(body)});
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.detail || 'error');
+  return data;
+}
+function show(form, msg) { form.querySelector('.err').textContent = msg ? (SAY[msg] || msg) : ''; }
+
+async function ask(form) {
+  show(form, '');
+  try {
+    const r = await post('/api/auth/code', {who});
+    try { localStorage.setItem('tamlil-who', who); } catch {}
+    $('#to').textContent = r.to;
+    $('#username').hidden = !r.new; $('#username').required = r.new;
+    $('#ask').hidden = true; $('#back').hidden = false; show($('#back'), '');
+    $('#code').value = ''; $('#code').focus();
+  } catch (e) { show(form, e.message); }
+}
+$('#ask').addEventListener('submit', e => { e.preventDefault(); who = $('#who').value.trim(); ask($('#ask')); });
+$('#again').addEventListener('click', () => ask($('#back')));
+$('#change').addEventListener('click', () => { $('#back').hidden = true; $('#ask').hidden = false; $('#who').focus(); });
+$('#back').addEventListener('submit', async e => {
+  e.preventDefault(); show($('#back'), '');
+  try {
+    await post('/api/auth/verify', {who, code: $('#code').value, username: $('#username').value.trim() || null});
+    location.href = '/';
+  } catch (err) {
+    if (err.message === 'need-username') { $('#username').hidden = false; $('#username').required = true; $('#username').focus(); }
+    if (['taken', 'username'].includes(err.message)) $('#username').select();
+    show($('#back'), err.message);
+  }
+});
+})();
+</script>
+</body>
+</html>

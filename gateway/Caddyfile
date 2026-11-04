@@ -1,0 +1,33 @@
+{
+	servers {
+		trusted_proxies static private_ranges
+	}
+}
+
+:80 {
+	encode gzip
+
+	# The tailnet gets in without signing in, and Tamlil is told so (the owner's tools work there).
+	# Everyone else has the header taken off, so nobody can claim it.
+	@tailnet remote_ip 100.64.0.0/10
+	@outside not remote_ip 100.64.0.0/10
+	request_header @outside -X-Tamlil-Tailnet
+	request_header @tailnet X-Tamlil-Tailnet 1
+
+	# Outside the tailnet: a sign-in cookie first, for everything but the sign-in page itself.
+	@gate {
+		not path /login /api/auth/code /api/auth/verify /api/auth/logout /static/*
+		not remote_ip 100.64.0.0/10
+	}
+	forward_auth @gate web:8000 {
+		uri /api/auth/check
+	}
+
+	@player path /embed/* /companion/* /css/* /js/* /videojs/* /vi/* /ggpht/* /sb/* /api/v1/* /api/manifest/* /latest_version* /videoplayback* /watch* /favicon*
+	handle @player {
+		reverse_proxy invidious:3000
+	}
+	handle {
+		reverse_proxy web:8000
+	}
+}

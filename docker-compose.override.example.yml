@@ -1,0 +1,13 @@
+# Copy to docker-compose.override.yml (git ignores it) for what only fits your server.
+# Docker Compose reads it on its own, next to docker-compose.yml.
+services:
+  gateway:
+    ports:
+      - "100.x.y.z:8445:80"          # also answer on your Tailscale address
+  web:
+    networks: [default, mail]          # reach a mail relay that runs in another Compose project
+
+networks:
+  mail:
+    external: true
+    name: protonmail-bridge_default    # that project's network (docker network ls)

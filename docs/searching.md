@@ -11,6 +11,21 @@ Type a word or a few words in **Search**, in Hebrew or English, and press Enter.
 - With a few words, it first looks for half-minute stretches that have ALL of them. If nothing does, it shows what has any of them.
 - Little words like "the", "and", של and את are left out.
 
+## Narrowing it down
+
+When I already know roughly where it was said, the row under the search box narrows it:
+
+- **Channel:** only one source. Clicking a channel's name on any result does the same.
+- **Title:** only videos with these words in the title, anywhere and in any order.
+- **From** and **To:** only videos uploaded between these dates.
+- **Sort:** **Best match** first (the default), **Newest**, **Oldest**, or **Most moments**, the videos that say it the most times.
+- **Clear** takes the filters off and keeps the search.
+
+They're all in the page's address, so the back button and a saved link keep them.
+
+![Searching רקיע in one channel, from 10 Oct, newest first](images/filters.png)
+*רקיע in one channel, from 10 October, newest first.*
+
 ## The results
 
 Each result is one video: its picture, title, channel, date, where its text came from, and its language. The videos with the best matches come first.

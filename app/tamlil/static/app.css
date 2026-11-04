@@ -71,6 +71,15 @@ mark.k-find{box-shadow:0 0 0 1.5px var(--focus);padding:0 1px}
 /* search */
 .sbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .sbar input{flex:1 1 320px;font:500 19px var(--f-body);padding:11px 15px;border-radius:10px}
+.filters{display:flex;flex-wrap:wrap;gap:8px 10px;align-items:center;margin-top:10px}
+.filters select,.filters input{font-size:14px;padding:6px 10px}
+.filters #s-src{max-width:240px}
+.filters #s-title{flex:0 1 190px}
+.filters .on{border-color:var(--ink)}
+.fdate{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:var(--muted)}
+.filters .clear{font-size:14px;font-weight:600;color:var(--focus)}
+.rmeta .chan{color:inherit}
+.rmeta .chan:hover{color:var(--ink);text-decoration:underline;text-underline-offset:3px}
 .meta-line{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;margin-top:12px;font-size:14px;color:var(--muted)}
 .forms{font-family:var(--f-display);color:var(--ink-2)}
 .count{margin-inline-start:auto;font:500 13px var(--f-mono);color:var(--muted);font-variant-numeric:tabular-nums}
@@ -155,6 +164,15 @@ tr.open td{background:var(--sunk)}
   .mark span{display:none}
   .rcard{grid-template-columns:112px minmax(0,1fr);grid-template-areas:"thumb head" "moments moments"}
   .count{margin-inline-start:0;width:100%}
+  /* filters: channel and sort, then the title, then the dates; 16px so phones don't zoom in */
+  .filters{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px}
+  .filters select,.filters input{font-size:16px;width:100%;min-width:0}
+  .filters #s-src{max-width:none;order:1}
+  .filters #s-sort{order:2}
+  .filters #s-title{order:3;grid-column:1/-1}
+  .fdate{order:4;min-width:0}
+  .fdate input{flex:1}
+  .filters .clear{order:5;grid-column:1/-1;justify-self:end}
 }
 
 /* people, and who's signed in */

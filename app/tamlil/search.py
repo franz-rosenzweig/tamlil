@@ -18,7 +18,19 @@ def _fts_query(qtoks, joiner):
     return f" {joiner} ".join(groups)
 
 
-def search(db, q: str, lang: str | None = None, source: int | None = None, limit: int = 40) -> dict:
+SORTS = ("best", "newest", "oldest", "moments")
+
+
+def _ymd(day: str | None) -> str | None:
+    """'2026-10-28' or '20261028' as YouTube's '20261028'; anything else as no limit."""
+    d = (day or "").replace("-", "")
+    return d if len(d) == 8 and d.isdigit() else None
+
+
+def search(db, q: str, lang: str | None = None, source: int | None = None, limit: int = 40, *,
+           title: str = "", date_from: str | None = None, date_to: str | None = None, sort: str = "best") -> dict:
+    """Videos whose transcripts say q, narrowed by language, source, words in the title and the
+    upload date, and sorted by the best match, the newest, the oldest or the most moments."""
     qtoks = query_tokens(q or "")
     head = {
         "text": q,
@@ -35,12 +47,23 @@ def search(db, q: str, lang: str | None = None, source: int | None = None, limit
     if source:
         where += " and video.source_id = ?"
         args.append(source)
+    for w in (title or "").lower().split()[:6]:                 # every word, anywhere in the title
+        where += " and lower(video.title) like ? escape '\\'"
+        args.append("%" + w.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%")
+    if _ymd(date_from):
+        where += " and video.upload_date >= ?"
+        args.append(_ymd(date_from))
+    if _ymd(date_to):
+        where += " and video.upload_date <= ?"
+        args.append(_ymd(date_to))
+    sort = sort if sort in SORTS else "best"
+    order = {"newest": "video.upload_date desc, rank", "oldest": "video.upload_date asc, rank"}.get(sort, "rank")
 
     sql = f"""select chunk.video_id, chunk.seg_from, chunk.seg_to, bm25(chunk_fts) as rank
               from chunk_fts join chunk on chunk.id = chunk_fts.rowid
               join video on video.id = chunk.video_id
               where chunk_fts match ? {where}
-              order by rank limit 600"""
+              order by {order} limit 600"""
     rows = db.execute(sql, [_fts_query(qtoks, "AND"), *args]).fetchall()
     if not rows and len(qtoks) > 1:
         rows = db.execute(sql, [_fts_query(qtoks, "OR"), *args]).fetchall()
@@ -77,7 +100,14 @@ def search(db, q: str, lang: str | None = None, source: int | None = None, limit
             "moments": len(moments),
             "_key": (-max(m["score"] for m in moments), best_rank[vid]),
         })
-    results.sort(key=lambda r: r["_key"])
+    if sort == "newest":
+        results.sort(key=lambda r: (r["video"]["upload_date"] or "", -r["moments"]), reverse=True)
+    elif sort == "oldest":
+        results.sort(key=lambda r: (r["video"]["upload_date"] or "99999999", -r["moments"]))
+    elif sort == "moments":
+        results.sort(key=lambda r: (-r["moments"], r["_key"]))
+    else:
+        results.sort(key=lambda r: r["_key"])
     for r in results:
         del r["_key"]
     results = results[:limit]

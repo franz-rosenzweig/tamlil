@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import accounts, config
+from .links import to_youtube
 from .db import connect, get_status
 from .search import search, video_hits
 
@@ -150,8 +151,10 @@ def get_config():
 
 
 @app.get("/api/search")
-def api_search(q: str = "", lang: str = "all", source: int | None = None):
-    return search(db(), q, None if lang == "all" else lang, source)
+def api_search(q: str = "", lang: str = "all", source: int | None = None, title: str = "",
+               date_from: str = "", date_to: str = "", sort: str = "best"):
+    return search(db(), q, None if lang == "all" else lang, source,
+                  title=title, date_from=date_from, date_to=date_to, sort=sort)
 
 
 @app.get("/api/videos/{video_id}")
@@ -181,9 +184,9 @@ _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 @app.post("/api/sources")
 def add_source(s: NewSource):
-    url = s.url.strip()
-    if not re.match(r"^https?://(www\.|m\.)?(youtube\.com|youtu\.be)/", url):
-        raise HTTPException(400, "YouTube link")
+    url = to_youtube(s.url)          # YouTube, Invidious or Materialious, kept as YouTube's own link
+    if not url:
+        raise HTTPException(400, "link")
     for d in (s.date_from, s.date_to):
         if d and not _DATE.match(d):
             raise HTTPException(400, "date")

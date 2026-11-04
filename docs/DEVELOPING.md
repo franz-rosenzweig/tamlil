@@ -77,7 +77,7 @@ docker exec tamlil-web python -m tamlil.reindex
 docker compose build web && docker run --rm -e TAMLIL_DATA=/tmp tamlil:latest python -m pytest -q tests
 ```
 
-They cover the Hebrew matching, the caption parser, the index, the accounts and codes, and listing in batches.
+They cover the Hebrew matching, the caption parser, the index, the search filters and sorting, the links from YouTube, Invidious and Materialious, the accounts and codes, and listing in batches.
 
 ## The demo
 

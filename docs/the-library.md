@@ -11,7 +11,7 @@ The Library is where the channels are. Each row is one source: a channel, a play
 
 Under **Add**:
 
-- **Channel, playlist or video:** its YouTube link. A channel's page, its @handle or its Videos tab all work.
+- **Channel, playlist or video:** its link. A channel's page, its @handle or its Videos tab all work, and so do links from Invidious and Materialious, on any instance: Tamlil reads the video, playlist or channel out of the link and keeps YouTube's own link for it, so the same channel can't be added twice.
 - **Language:** עברית or English if I know it, so it uses the right Whisper model straight away. With **Detect**, it works it out from the captions, or listens to 30 seconds from the middle of the video.
 - **From** and **To:** only videos uploaded between these dates. Either one can be empty.
 - **Max:** at most this many videos. Empty means no limit.

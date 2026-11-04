@@ -42,24 +42,51 @@ function parseHash() {
 function go(path) { location.hash = path; }
 
 /* ---------- search ---------- */
-const S = {q: '', lang: 'all'};
+const S = {q: '', lang: 'all', src: '', title: '', from: '', to: '', sort: 'best', sources: null};
+const SORTS = [['best', 'Best match'], ['newest', 'Newest'], ['oldest', 'Oldest'], ['moments', 'Most moments']];
+function searchHash(over = {}) {
+  const v = {q: S.q, lang: S.lang, src: S.src, title: S.title, from: S.from, to: S.to, sort: S.sort, ...over};
+  const p = new URLSearchParams();
+  for (const [k, x] of Object.entries(v)) if (x && !(k === 'lang' && x === 'all') && !(k === 'sort' && x === 'best')) p.set(k, x);
+  return '/search?' + p.toString();
+}
 async function viewSearch(params) {
-  S.q = params.get('q') || ''; S.lang = params.get('lang') || 'all';
+  for (const k of ['q', 'title', 'from', 'to', 'src']) S[k] = params.get(k) || '';
+  S.lang = params.get('lang') || 'all'; S.sort = params.get('sort') || 'best';
+  S.sources = (await api('/api/sources')).sources;
+  const filtered = S.src || S.title || S.from || S.to;
   $('#main').innerHTML = `
     <form class="sbar" id="sform" role="search">
       <input type="search" id="q" dir="auto" autocomplete="off" value="${esc(S.q)}" placeholder="Search" aria-label="Search">
       <div class="seg" role="group" aria-label="Language">${[['all', 'All'], ['he', 'עברית'], ['en', 'English']].map(([k, l]) =>
         `<button type="button" data-lang="${k}" aria-pressed="${S.lang === k}">${l}</button>`).join('')}</div>
     </form>
+    <div class="filters">
+      <select id="s-src" aria-label="Channel" class="${S.src ? 'on' : ''}"><option value="">All channels</option>${S.sources.map(x =>
+        `<option value="${x.id}" ${String(x.id) === S.src ? 'selected' : ''}>${esc(x.title || x.url)}</option>`).join('')}</select>
+      <input type="search" id="s-title" dir="auto" autocomplete="off" value="${esc(S.title)}" placeholder="Title" aria-label="Words in the title" class="${S.title ? 'on' : ''}">
+      <label class="fdate">From<input type="date" id="s-from" value="${esc(S.from)}" class="${S.from ? 'on' : ''}"></label>
+      <label class="fdate">To<input type="date" id="s-to" value="${esc(S.to)}" class="${S.to ? 'on' : ''}"></label>
+      <select id="s-sort" aria-label="Sort">${SORTS.map(([k, l]) => `<option value="${k}" ${S.sort === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
+      <button type="button" class="linkish clear" id="s-clear" ${filtered ? '' : 'hidden'}>Clear</button>
+    </div>
     <div class="meta-line" id="qmeta"></div>
     <div class="results" id="results"></div>`;
   const input = $('#q');
   if (!S.q) input.focus();
-  $('#sform').addEventListener('submit', e => { e.preventDefault(); go(`/search?q=${encodeURIComponent(input.value.trim())}&lang=${S.lang}`); });
-  $$('[data-lang]').forEach(b => b.addEventListener('click', () => go(`/search?q=${encodeURIComponent(input.value.trim())}&lang=${b.dataset.lang}`)));
+  $('#sform').addEventListener('submit', e => { e.preventDefault(); go(searchHash({q: input.value.trim()})); });
+  $$('[data-lang]').forEach(b => b.addEventListener('click', () => go(searchHash({q: input.value.trim(), lang: b.dataset.lang}))));
+  const set = (k, el) => el.addEventListener('change', () => go(searchHash({q: input.value.trim(), [k]: el.value.trim()})));
+  set('src', $('#s-src')); set('title', $('#s-title')); set('from', $('#s-from')); set('to', $('#s-to')); set('sort', $('#s-sort'));
+  $('#s-clear').addEventListener('click', () => go(searchHash({q: input.value.trim(), src: '', title: '', from: '', to: ''})));
   if (!S.q) { await emptyState(); return; }
   $('#results').innerHTML = '<div class="empty">…</div>';
-  const res = await api(`/api/search?q=${encodeURIComponent(S.q)}&lang=${S.lang}`);
+  const qs = new URLSearchParams({q: S.q, lang: S.lang, sort: S.sort});
+  if (S.src) qs.set('source', S.src);
+  if (S.title) qs.set('title', S.title);
+  if (S.from) qs.set('date_from', S.from);
+  if (S.to) qs.set('date_to', S.to);
+  const res = await api(`/api/search?${qs}`);
   const words = res.query.words.map(w => `<span class="forms" dir="auto">${w.forms.map(esc).join(' · ')}</span>`).join(' &nbsp;+&nbsp; ');
   $('#qmeta').innerHTML = `${words}<span class="count">${res.results.length ? `${res.moments} moments · ${res.results.length} videos` : ''}</span>`;
   $('#results').innerHTML = res.results.length ? res.results.map(card).join('') : '<div class="empty">0</div>';
@@ -79,7 +106,7 @@ function card(r) {
     <a class="thumb" href="${link(t0)}" style="background-image:url('${thumb(v.id)}')" aria-label="${esc(v.title)}">${v.duration ? `<span class="dur">${fmt(v.duration * 1000)}</span>` : ''}</a>
     <div class="rhead">
       <h3 class="rtitle" dir="auto"><a class="linkish" href="${link(t0)}">${esc(v.title)}</a></h3>
-      <div class="rmeta"><span dir="auto">${esc(v.channel)}</span><span>${day(v.upload_date)}</span><span class="src src-${v.origin}">${ORIGIN[v.origin] || ''}</span><span>${LANG[v.lang] || ''}</span></div>
+      <div class="rmeta"><button class="linkish chan" data-src="${v.source_id}" dir="auto" title="Only this channel">${esc(v.channel)}</button><span>${day(v.upload_date)}</span><span class="src src-${v.origin}">${ORIGIN[v.origin] || ''}</span><span>${LANG[v.lang] || ''}</span></div>
       ${marks ? `<div class="strip" dir="ltr">${marks}</div>` : ''}
     </div>
     <div class="rmoments"><ol class="moments">${r.top.map(m => `
@@ -122,7 +149,7 @@ async function viewVideo(id, params) {
     </div>
     <div class="tbar"><input type="search" id="find" dir="auto" placeholder="Find" aria-label="Find in transcript"><span class="count" id="tcount">${segs.length} lines</span></div>
     <ol class="tlines" id="tlines"></ol>`;
-  const back = $('#back'); if (back) back.addEventListener('click', () => go(`/search?q=${encodeURIComponent(q)}&lang=${S.lang}`));
+  const back = $('#back'); if (back) back.addEventListener('click', () => go(searchHash({q})));
   const strip = s => s.normalize('NFD').replace(/[֑-ׇ]/g, '').toLowerCase();
   function lines(find) {
     const f = strip(find || '').trim(); let n = 0;
@@ -183,7 +210,7 @@ async function viewLibrary() {
     <section class="add">
       <h3>${editing ? 'Edit' : 'Add'}</h3>
       <form class="addf" id="addf">
-        <label>Channel, playlist or video<input type="url" id="f-url" required placeholder="https://www.youtube.com/@…" dir="ltr"></label>
+        <label>Channel, playlist or video<input type="text" inputmode="url" autocomplete="off" spellcheck="false" id="f-url" required placeholder="https://www.youtube.com/@…" dir="ltr"></label>
         <label>Language<select id="f-lang"><option value="auto">Detect</option><option value="he">עברית</option><option value="en">English</option></select></label>
         <label>From<input type="date" id="f-from"></label>
         <label>To<input type="date" id="f-to"></label>
@@ -203,7 +230,7 @@ async function viewLibrary() {
       if (editing) { await api(`/api/sources/${editing}`, {method: 'PATCH', body: JSON.stringify(body)}); editing = null; toast('Saved'); }
       else { await api('/api/sources', {method: 'POST', body: JSON.stringify(body)}); toast('Added'); }
       viewLibrary(); pollWorker();
-    } catch (err) { toast(err.message === 'exists' ? 'Already in the library' : err.message); }
+    } catch (err) { toast({exists: 'Already in the library', link: 'Not a YouTube link'}[err.message] || err.message); }
   });
   if (openSource) loadVideos(openSource);
   if (ME.admin) viewPeople();
@@ -236,6 +263,10 @@ async function viewPeople() {
     } catch (err) { toast({exists: 'Already on the list', email: 'Check the email'}[err.message] || err.message); }
   });
 }
+document.addEventListener('click', e => {           // a result's channel: only that channel
+  const c = e.target.closest('.chan[data-src]');
+  if (c) go(searchHash({src: c.dataset.src}));
+});
 document.addEventListener('click', async e => {
   const t = e.target.closest('[data-unperson]');
   if (!t) return;

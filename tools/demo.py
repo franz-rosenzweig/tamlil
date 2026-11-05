@@ -169,7 +169,10 @@ PENDING = [
     (0, "dmYabasha04", "היום השלישי: היבשה והים", "20261104", "new", 2460),
 ]
 
-PEOPLE = [("dana@example.com", "dana"), ("yoni@example.com", "yoni"), ("avital@example.com", None)]
+PEOPLE = [("dana@example.com", "dana", "Dana Mizrahi"), ("yoni@example.com", "yoni", "Yoni Peretz"),
+          ("avital@example.com", None, "Avital")]
+ASKING = [("noam@example.com", "Noam Shapira", "noam.s", "From the Thursday night shiur", 3 * 3600),
+          ("ruth.b@example.com", "Ruth Ben-David", "ruthbd", "Dana's sister", 26 * 3600)]
 
 
 def timings(lines):
@@ -209,14 +212,21 @@ def build(data: Path):
             "insert into video(id, source_id, title, channel, upload_date, duration, lang, tracks, state)"
             " values (?,?,?,?,?,?,'he','{}',?)", (vid, si + 1, title, SOURCES[si]["title"].split(" · ")[0], day, duration, state))
 
-    for email, _ in PEOPLE:
-        accounts.allow(email, invite=False)
+    for email, _, name in PEOPLE:
+        accounts.allow(email, invite=False, name=name)
     d = accounts._read()
     for p in d["people"]:
-        name = dict(PEOPLE)[p["email"]]
-        if name:
-            p["username"], p["joined"] = name, p["added"] + 3600
+        username = next(u for e, u, _ in PEOPLE if e == p["email"])
+        if username:
+            p["username"], p["joined"] = username, p["added"] + 3600
+    d["people"][0]["pass"] = accounts.hash_pass("demo-password")
+    now = int(time.time())
+    d["requests"] = [{"email": e, "name": n, "username": u, "note": note, "pass": None, "at": now - ago}
+                     for e, n, u, note, ago in ASKING]
     accounts._write(d)
+    db.execute("update source set paused=1 where id=3")              # the playlist, paused
+    db.execute("insert into share(token, video_id, made_by, made_at) values ('demo-share-link', ?, 'dana', ?)",
+               (VIDEOS[0][1], now - 86400))
     return db, accounts._cookie(d, d["people"][0])
 
 

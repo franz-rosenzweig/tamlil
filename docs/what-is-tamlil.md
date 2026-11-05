@@ -19,12 +19,12 @@ The name is the Hebrew תמליל, a transcript.
 
 - Add the channels and set their dates, in the Library.
 - Search, and open the moments I want. See [Searching](searching.md) and [Watching](watching.md).
-- Invite the few people who use it with me. See [People and signing in](people.md).
+- Invite the few people who use it with me. See [Signing in, people and Settings](people.md).
 
 ## Where I open it
 
 - **On the tailnet:** port 8445 on my server's tailnet address. No sign-in, because Tailscale already knows it's me.
-- **Anywhere else:** https://tamlil.tiresia.xyz, where everyone signs in with a code by email.
+- **Anywhere else:** https://tamlil.tiresia.xyz, where everyone signs in with a code by email or a password.
 
 <p align="center"><img src="images/signin.png" width="320" alt="Signing in: the code that came by email, and a username the first time"></p>
 

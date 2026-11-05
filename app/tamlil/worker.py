@@ -22,6 +22,10 @@ LIST_BATCH = 10     # new videos per listing pass; their transcripts come before
 MAX_ATTEMPTS = 3
 
 
+class Paused(Exception):
+    """Its channel was paused partway through Whisper; the video goes back in line."""
+
+
 def _short(err: BaseException) -> str:
     msg = str(err).strip().splitlines()[0] if str(err).strip() else type(err).__name__
     return msg.replace("ERROR: ", "")[:300]
@@ -34,10 +38,11 @@ def _ymd(d: str | None) -> str | None:
 def refresh_due(db) -> bool:
     src = db.execute(
         """select * from source
-           where state='new' or (checked_at is null and state != 'more')
-              or (state='more' and not exists (select 1 from video where state='new'))
+           where not paused and (state='new' or (checked_at is null and state != 'more')
+              or (state='more' and not exists (select 1 from video join source s on s.id=video.source_id
+                                               where video.state='new' and not s.paused))
               or (state='ok' and checked_at < datetime('now', ?))
-              or (state='error' and checked_at < datetime('now', '-1 hour'))
+              or (state='error' and checked_at < datetime('now', '-1 hour')))
            order by checked_at is not null, checked_at limit 1""",
         (f"-{int(config.REFRESH_HOURS * 60)} minutes",),
     ).fetchone()
@@ -120,8 +125,8 @@ def _list_source(db, src, continuing=False) -> bool:
 def process_next(db) -> bool:
     v = db.execute(
         """select video.*, source.lang as source_lang from video join source on source.id = video.source_id
-           where video.state='new'
-              or (video.state='error' and video.attempts < ? and video.retry_at < ?)
+           where not source.paused and (video.state='new'
+              or (video.state='error' and video.attempts < ? and video.retry_at < ?))
            order by video.state='error', video.upload_date desc limit 1""",
         (MAX_ATTEMPTS, time.time()),
     ).fetchone()
@@ -130,6 +135,9 @@ def process_next(db) -> bool:
     work = config.TMP / v["id"]
     try:
         _process(db, v, work)
+    except Paused:
+        log.info("paused partway through %s", v["id"])
+        db.execute("update video set state='new', updated_at=datetime('now') where id=?", (v["id"],))
     except Exception as e:  # noqa: BLE001
         log.warning("video %s failed: %s\n%s", v["id"], e, traceback.format_exc())
         db.execute(
@@ -178,6 +186,8 @@ def _process(db, v, work):
     def progress(frac):
         if time.time() - last[0] > 15:
             last[0] = time.time()
+            if db.execute("select paused from source where id=?", (v["source_id"],)).fetchone()[0]:
+                raise Paused()
             set_status(db, doing="transcribing", video=v["id"], title=title, progress=round(frac, 3),
                        started=started, duration=v["duration"])
 

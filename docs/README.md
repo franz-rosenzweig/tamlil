@@ -11,8 +11,8 @@ These pages are how Tamlil works, written down. It searches YouTube videos by wh
 ### Using it
 - [The Library](the-library.md): adding a channel, its dates and its limit, and what happens next
 - [Searching](searching.md): the search box, the results, and how Hebrew words match
-- [Watching](watching.md): the player, the transcript, and stepping through the matches
-- [People and signing in](people.md): inviting people, the code by email, and usernames
+- [Watching](watching.md): the player, the transcript, stepping through the matches, and sharing and exporting
+- [Signing in, people and Settings](people.md): codes and passwords, your account, inviting people and asking for an invite
 
 ### Under the hood
 - [How it works](how-it-works.md): captions or Whisper, the index, the VPN and the player

@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="referrer" content="no-referrer">
+<title>Tamlil</title>
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/fonts.css">
+<link rel="stylesheet" href="/static/app.css">
+<style>
+  .top .mark{pointer-events:none}
+  .shead{margin-bottom:16px}
+  .shead h1{margin:0;font:600 22px/1.3 var(--f-display)}
+  .shead .rmeta{margin-top:6px}
+  .player{margin-bottom:6px}
+</style>
+</head>
+<body>
+<header class="top">
+  <span class="mark">Tamlil <span lang="he" dir="rtl">תמליל</span></span>
+</header>
+<main id="main"><div class="empty">…</div></main>
+<script>
+(() => {
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
+const dirOf = s => /[א-ת]/.test(s || '') ? 'rtl' : 'ltr';
+const fmt = ms => { let s = Math.max(0, Math.round(ms / 1000)); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
+  return (h ? h + ':' + String(m).padStart(2, '0') : String(m)) + ':' + String(x).padStart(2, '0'); };
+const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const day = d => d && d.length === 8 ? `${+d.slice(6)} ${MON[+d.slice(4, 6) - 1]} ${d.slice(0, 4)}` : '';
+const token = location.pathname.split('/').filter(Boolean)[1] || '';
+const start = Math.max(0, parseInt(new URLSearchParams(location.search).get('t') || '0', 10) || 0) * 1000;
+const embed = (id, ms) => `https://www.youtube-nocookie.com/embed/${id}?start=${Math.floor(ms / 1000)}&autoplay=${ms ? 1 : 0}&rel=0`;
+const yt = (id, ms) => `https://www.youtube.com/watch?v=${id}&t=${Math.floor(ms / 1000)}s`;
+
+fetch(`/api/shared/${encodeURIComponent(token)}`).then(r => { if (!r.ok) throw new Error(); return r.json(); }).then(({video: v, segments}) => {
+  document.title = `${v.title} · Tamlil`;
+  let now = start;
+  $('#main').innerHTML = `
+    <div class="shead">
+      <h1 dir="auto">${esc(v.title)}</h1>
+      <div class="rmeta"><span dir="auto">${esc(v.channel)}</span><span>${day(v.upload_date)}</span>${v.duration ? `<span>${fmt(v.duration * 1000)}</span>` : ''}</div>
+    </div>
+    <div class="vgrid">
+      <div><div class="player"><iframe id="frame" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen src="${embed(v.id, now)}"></iframe></div></div>
+      <div class="vmeta">
+        <div class="vbtns">
+          <a class="btn small" id="yt" href="${yt(v.id, now)}" target="_blank" rel="noopener">YouTube ↗</a>
+          <details class="menu"><summary class="btn small">Export</summary><div class="pop">${[['txt', 'Text · .txt'], ['srt', 'Subtitles · .srt'], ['vtt', 'Subtitles · .vtt'], ['json', 'JSON']].map(([f, l]) =>
+            `<a href="/api/shared/${encodeURIComponent(token)}/export?format=${f}" download>${l}</a>`).join('')}</div></details>
+        </div>
+      </div>
+    </div>
+    <div class="tbar"><input type="search" id="find" dir="auto" placeholder="Find" aria-label="Find in transcript"><span class="count" id="tcount">${segments.length} lines</span></div>
+    <ol class="tlines" id="tlines"></ol>`;
+  const strip = s => s.normalize('NFD').replace(/[֑-ׇ]/g, '').toLowerCase();
+  function lines(find) {
+    const f = strip(find || '').trim(); let n = 0;
+    $('#tlines').innerHTML = segments.map(s => {
+      let html = esc(s.text);
+      if (f) { const low = strip(s.text); if (low.includes(f)) n++; else return ''; }
+      return `<li class="tl" dir="${dirOf(s.text)}" data-ms="${s.start_ms}"><button class="ts" dir="ltr" data-seek="${s.start_ms}">${fmt(s.start_ms)}</button><div><p class="line">${html}</p></div></li>`;
+    }).join('');
+    $('#tcount').textContent = f ? `${n} / ${segments.length}` : `${segments.length} lines`;
+    mark(false);
+  }
+  function mark(scroll) {
+    let cur = null;
+    for (const li of $$('.tl')) { li.classList.remove('now'); if (+li.dataset.ms <= now + 999) cur = li; }   // links round down to the second
+    if (cur) { cur.classList.add('now'); if (scroll) cur.scrollIntoView({block: 'center', behavior: 'smooth'}); }
+  }
+  $('#main').addEventListener('click', e => {
+    const b = e.target.closest('[data-seek]');
+    if (!b) return;
+    now = +b.dataset.seek; $('#frame').src = embed(v.id, now); $('#yt').href = yt(v.id, now);
+    history.replaceState(null, '', `?t=${Math.floor(now / 1000)}`); mark(true);
+  });
+  document.addEventListener('click', e => { for (const d of $$('details.menu[open]')) if (!d.contains(e.target)) d.open = false; });
+  $('#find').addEventListener('input', e => lines(e.target.value));
+  lines('');
+}).catch(() => { $('#main').innerHTML = '<div class="empty">Not shared anymore</div>'; });
+})();
+</script>
+</body>
+</html>

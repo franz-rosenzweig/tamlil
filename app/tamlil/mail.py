@@ -1,4 +1,4 @@
-"""Tamlil's few emails (sign-in codes and invites), through an SMTP server such as Proton Mail Bridge:
+"""Tamlil's few emails (codes, invites, and requests for an invite), through an SMTP server such as Proton Mail Bridge:
 STARTTLS, then AUTH, one message per connection.
 
 Where it sends from: TAMLIL_MAIL, or /data/mail.json (600, never in git):
@@ -37,20 +37,23 @@ def available() -> bool:
     return _cfg() is not None
 
 
-def send(to: str, subject: str, text: str) -> bool:
-    """True when it went out."""
+def send(to: str, subject: str, text: str, html: str | None = None) -> bool:
+    """True when it went out. With html, it's both, and mail apps pick the one they show."""
     c = _cfg()
     if c is None:
         return False
     if c == "outbox":
         with open(config.DATA / "outbox.jsonl", "a") as f:
-            f.write(json.dumps({"at": int(time.time()), "to": to, "subject": subject, "text": text}, ensure_ascii=False) + "\n")
+            f.write(json.dumps({"at": int(time.time()), "to": to, "subject": subject, "text": text, "html": html},
+                               ensure_ascii=False) + "\n")
         return True
     m = EmailMessage()
     m["From"], m["To"], m["Subject"] = c["from"], to, subject
     m["Date"] = formatdate(localtime=True)
     m["Message-ID"] = make_msgid(domain=c["from"].split("@")[-1].strip(">"))
     m.set_content(text)
+    if html:
+        m.add_alternative(html, subtype="html")
     host = c.get("host", "127.0.0.1")
     ctx = ssl.create_default_context()
     if host in LOCAL:

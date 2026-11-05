@@ -56,6 +56,12 @@ create table if not exists chunk(
 );
 create virtual table if not exists chunk_fts using fts5(norm, tokenize='unicode61 remove_diacritics 0');
 create table if not exists kv(key text primary key, value text);
+create table if not exists share(
+  token text primary key,
+  video_id text references video(id) on delete cascade,
+  made_by text,
+  made_at integer
+);
 create index if not exists video_source on video(source_id);
 create index if not exists video_state on video(state);
 create index if not exists chunk_video on chunk(video_id);
@@ -73,6 +79,12 @@ def connect() -> sqlite3.Connection:
     db.execute("pragma foreign_keys=on")
     db.execute("pragma busy_timeout=30000")
     db.executescript(SCHEMA)
+    cols = {r["name"] for r in db.execute("pragma table_info(source)")}
+    if "paused" not in cols:                       # added after the first release
+        try:
+            db.execute("alter table source add column paused integer default 0")
+        except sqlite3.OperationalError:           # the web and the worker start together
+            pass
     return db
 
 

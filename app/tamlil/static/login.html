@@ -9,13 +9,19 @@
 <link rel="stylesheet" href="/static/app.css">
 <style>
   .gate{min-height:100vh;display:grid;place-items:center;padding:16px}
-  .gate form{display:grid;gap:14px;width:min(340px,100%);background:var(--surface);border:1px solid var(--rule);border-radius:14px;padding:26px 24px}
+  .gate form,.gate .card{display:grid;gap:12px;width:min(360px,100%);background:var(--surface);border:1px solid var(--rule);border-radius:14px;padding:26px 24px}
   .gate .mark{justify-content:center;font-size:26px;margin-bottom:6px}
-  .gate input{font-size:17px;padding:11px 14px}
-  .gate #code{font:600 22px var(--f-mono);letter-spacing:.18em;text-align:center}
+  .gate h2{margin:-4px 0 2px;font:600 17px var(--f-display);text-align:center;color:var(--ink-2)}
+  .gate input,.gate textarea{font-size:17px;padding:11px 14px;width:100%}
+  .gate textarea{font:inherit;font-size:17px;border:1.5px solid var(--rule-2);border-radius:8px;background:var(--surface);color:var(--ink);resize:vertical;min-height:72px}
+  .gate .codein{font:600 22px var(--f-mono);letter-spacing:.18em;text-align:center}
   .gate .to{display:flex;align-items:center;justify-content:center;gap:6px;margin:-4px 0 0;color:var(--muted);font:500 14px var(--f-mono)}
-  .gate .again{justify-self:center;font-size:14px;color:var(--muted)}
+  .gate .alt{display:flex;flex-wrap:wrap;justify-content:center;gap:6px 18px;font-size:14px}
+  .gate .alt .linkish,.gate .alt a{color:var(--muted);font-weight:600}
+  .gate .alt a{color:var(--focus)}
   .gate .err{color:var(--bad);font-size:14px;min-height:1.2em;margin:0;text-align:center}
+  .gate .done{margin:0;text-align:center;font-size:16px}
+  .gate .done b{display:block;font:700 30px var(--f-display);color:var(--ok)}
   .gate [hidden]{display:none}
 </style>
 </head>
@@ -24,29 +30,63 @@
   <form id="ask">
     <div class="mark">Tamlil <span lang="he" dir="rtl">תמליל</span></div>
     <input type="text" id="who" autocomplete="username" inputmode="email" autocapitalize="none" spellcheck="false" placeholder="Email or username" aria-label="Email or username" required autofocus>
-    <button class="btn primary" type="submit">Send code</button>
+    <input type="password" id="pw" autocomplete="current-password" placeholder="Password" aria-label="Password" hidden>
+    <button class="btn primary" type="submit" id="go">Send code</button>
+    <div class="alt"><button class="linkish" type="button" id="mode">Use a password</button><a href="/join" id="tojoin" hidden>Ask for an invite</a></div>
     <p class="err" role="alert"></p>
   </form>
+
   <form id="back" hidden>
     <div class="mark">Tamlil <span lang="he" dir="rtl">תמליל</span></div>
     <p class="to"><button class="icon" type="button" id="change" title="Back" aria-label="Back">←</button><span id="to"></span></p>
-    <input type="text" id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="000 000" aria-label="Code" required>
+    <input type="text" id="code" class="codein" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="000 000" aria-label="Code" required>
     <input type="text" id="username" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="32" placeholder="Pick a username" aria-label="Username" title="2–32: a–z, 0–9, . _ -" hidden>
     <button class="btn primary" type="submit">Sign in</button>
-    <button class="linkish again" type="button" id="again">Send again</button>
+    <div class="alt"><button class="linkish" type="button" id="again">Send again</button></div>
     <p class="err" role="alert"></p>
   </form>
+
+  <form id="join" hidden>
+    <div class="mark">Tamlil <span lang="he" dir="rtl">תמליל</span></div>
+    <h2>Ask for an invite</h2>
+    <input type="text" id="j-name" autocomplete="name" maxlength="60" placeholder="Name" aria-label="Name" required>
+    <input type="email" id="j-email" autocomplete="email" autocapitalize="none" spellcheck="false" placeholder="Email" aria-label="Email" required>
+    <input type="text" id="j-user" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="32" placeholder="Username" aria-label="Username" title="2–32: a–z, 0–9, . _ -" required>
+    <input type="password" id="j-pw" autocomplete="new-password" minlength="8" placeholder="Password · optional" aria-label="Password, optional">
+    <textarea id="j-note" maxlength="300" rows="2" dir="auto" placeholder="How do we know each other?" aria-label="How do we know each other?"></textarea>
+    <button class="btn primary" type="submit">Ask</button>
+    <div class="alt"><a href="/login">Sign in</a></div>
+    <p class="err" role="alert"></p>
+  </form>
+
+  <form id="joincode" hidden>
+    <div class="mark">Tamlil <span lang="he" dir="rtl">תמליל</span></div>
+    <p class="to"><button class="icon" type="button" id="j-change" title="Back" aria-label="Back">←</button><span id="j-to"></span></p>
+    <input type="text" id="j-code" class="codein" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="000 000" aria-label="Code" required>
+    <button class="btn primary" type="submit">Finish</button>
+    <p class="err" role="alert"></p>
+  </form>
+
+  <div class="card" id="asked" hidden>
+    <div class="mark">Tamlil <span lang="he" dir="rtl">תמליל</span></div>
+    <p class="done"><b>✓</b>Asked. You'll get an email when you're in.</p>
+    <div class="alt"><a href="/login">Sign in</a></div>
+  </div>
 </main>
 <script>
 (() => {
 const $ = s => document.querySelector(s);
 const SAY = {
-  'not-on-list': 'Not on the list', throttled: 'Too many tries. Wait a bit.', mail: "Couldn't send the email",
-  wrong: 'Wrong code', expired: 'Code expired', taken: 'Username taken', username: '2–32: a–z, 0–9, . _ -',
-  'need-username': 'Pick a username',
+  'not-on-list': 'Not on the list', pending: 'Asked already. Waiting for a yes.', throttled: 'Too many tries. Wait a bit.',
+  locked: 'Too many tries. Use a code, or wait 15 minutes.', login: 'Wrong username or password', mail: "Couldn't send the email",
+  wrong: 'Wrong code', expired: 'Code expired', taken: 'Username taken', username: 'Username: 2–32 of a–z, 0–9, . _ -',
+  'need-username': 'Pick a username', closed: 'Not taking requests right now', name: 'Add your name', email: 'Check the email',
+  short: 'Passwords are at least 8 characters', long: 'That password is too long', exists: 'Already on the list',
 };
-let who = '';
-try { $('#who').value = localStorage.getItem('tamlil-who') || ''; } catch {}
+const FORMS = ['#ask', '#back', '#join', '#joincode', '#asked'];
+function only(id) { for (const f of FORMS) $(f).hidden = f !== id; }
+let who = '', usePw = false;
+try { $('#who').value = localStorage.getItem('tamlil-who') || ''; usePw = localStorage.getItem('tamlil-mode') === 'password'; } catch {}
 
 async function post(path, body) {
   const r = await fetch(path, {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify(body)});
@@ -55,21 +95,35 @@ async function post(path, body) {
   return data;
 }
 function show(form, msg) { form.querySelector('.err').textContent = msg ? (SAY[msg] || msg) : ''; }
+function mode(pw) {
+  usePw = pw;
+  $('#pw').hidden = !pw; $('#pw').required = pw;
+  $('#go').textContent = pw ? 'Sign in' : 'Send code';
+  $('#mode').textContent = pw ? 'Use a code' : 'Use a password';
+  try { localStorage.setItem('tamlil-mode', pw ? 'password' : 'code'); } catch {}
+}
 
 async function ask(form) {
   show(form, '');
   try {
     const r = await post('/api/auth/code', {who});
-    try { localStorage.setItem('tamlil-who', who); } catch {}
     $('#to').textContent = r.to;
     $('#username').hidden = !r.new; $('#username').required = r.new;
-    $('#ask').hidden = true; $('#back').hidden = false; show($('#back'), '');
+    only('#back'); show($('#back'), '');
     $('#code').value = ''; $('#code').focus();
   } catch (e) { show(form, e.message); }
 }
-$('#ask').addEventListener('submit', e => { e.preventDefault(); who = $('#who').value.trim(); ask($('#ask')); });
+$('#ask').addEventListener('submit', async e => {
+  e.preventDefault(); who = $('#who').value.trim();
+  try { localStorage.setItem('tamlil-who', who); } catch {}
+  if (!usePw) return ask($('#ask'));
+  show($('#ask'), '');
+  try { await post('/api/auth/password', {who, password: $('#pw').value}); location.href = '/'; }
+  catch (err) { show($('#ask'), err.message); $('#pw').select(); }
+});
+$('#mode').addEventListener('click', () => { mode(!usePw); show($('#ask'), ''); (usePw && $('#who').value ? $('#pw') : $('#who')).focus(); });
 $('#again').addEventListener('click', () => ask($('#back')));
-$('#change').addEventListener('click', () => { $('#back').hidden = true; $('#ask').hidden = false; $('#who').focus(); });
+$('#change').addEventListener('click', () => { only('#ask'); $('#who').focus(); });
 $('#back').addEventListener('submit', async e => {
   e.preventDefault(); show($('#back'), '');
   try {
@@ -81,6 +135,40 @@ $('#back').addEventListener('submit', async e => {
     show($('#back'), err.message);
   }
 });
+
+/* asking for an invite */
+let asking = '';
+$('#join').addEventListener('submit', async e => {
+  e.preventDefault(); show($('#join'), '');
+  asking = $('#j-email').value.trim();
+  try {
+    const r = await post('/api/auth/join', {name: $('#j-name').value, email: asking, username: $('#j-user').value.trim(),
+      password: $('#j-pw').value || null, note: $('#j-note').value});
+    if (r.allowed) { $('#who').value = asking; only('#ask'); show($('#ask'), 'exists'); return; }
+    $('#j-to').textContent = asking; $('#j-code').value = ''; only('#joincode'); $('#j-code').focus();
+  } catch (err) {
+    show($('#join'), err.message);
+    if (['taken', 'username'].includes(err.message)) $('#j-user').select();
+    if (['short', 'long'].includes(err.message)) $('#j-pw').select();
+  }
+});
+$('#j-change').addEventListener('click', () => { only('#join'); show($('#join'), ''); });
+$('#joincode').addEventListener('submit', async e => {
+  e.preventDefault(); show($('#joincode'), '');
+  try {
+    const r = await post('/api/auth/join/verify', {email: asking, code: $('#j-code').value});
+    if (r.allowed) { $('#who').value = asking; only('#ask'); show($('#ask'), 'exists'); return; }
+    only('#asked');
+  } catch (err) { show($('#joincode'), err.message); }
+});
+
+mode(usePw);
+const joining = location.pathname === '/join';
+if (joining) { only('#join'); $('#j-name').focus(); }
+fetch('/api/auth/open').then(r => r.json()).then(o => {
+  $('#tojoin').hidden = !o.requests;
+  if (joining && !o.requests) { only('#ask'); show($('#ask'), 'closed'); }
+}).catch(() => {});
 })();
 </script>
 </body>

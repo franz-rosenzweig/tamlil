@@ -33,11 +33,11 @@ docker compose logs -f worker
 
 ## The tailnet and the outside
 
-The gateway lets in anything from Tailscale's range (100.64.0.0/10) without a sign-in, and tells the app so with a header that it strips from everyone else. Everything else needs a sign-in cookie, checked on every request. To open Tamlil from anywhere, point a tunnel or a proxy at 127.0.0.1:8445 (mine is a Cloudflare tunnel), and set `TAMLIL_URL` to that address.
+The gateway lets in anything from Tailscale's range (100.64.0.0/10) without a sign-in, and tells the app so with a header that it strips from everyone else. Everything else needs a sign-in cookie, checked on every request, except the sign-in pages (`/login`, `/join` and `/api/auth/*`), the static files, and the transcripts someone chose to share (`/s/*` and `/api/shared/*`). To open Tamlil from anywhere, point a tunnel or a proxy at 127.0.0.1:8445 (mine is a Cloudflare tunnel), and set `TAMLIL_URL` to that address.
 
 ## Mail
 
-The codes and invites go out through any SMTP server with STARTTLS, set in `mail.json` in `DATA_DIR` (mode 600):
+The emails (the codes, the invites, the welcome after a yes, and the note to the owner about a request) go out through any SMTP server with STARTTLS, set in `mail.json` in `DATA_DIR` (mode 600):
 
 ```json
 { "host": "protonmail-bridge", "port": 25, "user": "...", "pass": "...", "from": "Tamlil <support@example.com>" }
@@ -45,7 +45,9 @@ The codes and invites go out through any SMTP server with STARTTLS, set in `mail
 
 Mine is Proton Mail Bridge in its own Compose project, so the override puts the web container on Bridge's network and `host` is Bridge's container name. A self-signed certificate is accepted only from localhost and that name. Without `mail.json`, nobody can sign in from outside the tailnet.
 
-For the codes to land in inboxes and not in spam, the `from` domain needs SPF, DKIM and DMARC records, which your mail provider gives you when you add the domain.
+Each email is HTML in Tamlil's colors with a plain text copy, both in `emails.py`. The icon in them loads from `/static/icon-mail.png` at `TAMLIL_URL`, so that address has to be reachable from outside for the picture to show.
+
+For the emails to land in inboxes and not in spam, the `from` domain needs SPF, DKIM and DMARC records, which your mail provider gives you when you add the domain.
 
 ## People from the command line
 
@@ -55,14 +57,14 @@ docker exec tamlil-web python -m tamlil.accounts allow EMAIL [--quiet]   # --qui
 docker exec tamlil-web python -m tamlil.accounts remove EMAIL
 ```
 
-The first address on the list is the owner's.
+The first address on the list is the owner's. `list` shows the requests waiting too.
 
 ## What it keeps
 
 Everything is in `DATA_DIR`:
 
-- `tamlil.db`: the sources, videos, transcripts and the index (SQLite).
-- `accounts.json` (the people and the cookie secret) and `mail.json`, both mode 600.
+- `tamlil.db`: the sources, videos, transcripts, the index and the shared links (SQLite).
+- `accounts.json`: the people (with scrypt hashes for anyone who set a password), the requests, the two settings for requests, and the cookie secret. It and `mail.json` are both mode 600.
 - `tmp/` for audio while it's transcribed, `cache/` for yt-dlp, and `pylib/` for the daily yt-dlp.
 
 After changing the Hebrew rules in `hebrew.py`, rebuild the index from the saved transcripts:
@@ -77,11 +79,11 @@ docker exec tamlil-web python -m tamlil.reindex
 docker compose build web && docker run --rm -e TAMLIL_DATA=/tmp tamlil:latest python -m pytest -q tests
 ```
 
-They cover the Hebrew matching, the caption parser, the index, the search filters and sorting, the links from YouTube, Invidious and Materialious, the accounts and codes, and listing in batches.
+They cover the Hebrew matching, the caption parser, the index, the search filters and sorting, the links from YouTube, Invidious and Materialious, the accounts, codes and passwords, asking for an invite, the emails, export, and listing in batches.
 
 ## The demo
 
-The pictures in these docs come from `tools/demo.py`. It builds a database with made-up channels and lectures, three made-up people, and a worker halfway through a lecture, and serves the real app on it, with drawn thumbnails and a still player in place of YouTube. Pictures of my own Tamlil would show what I watch and who I share it with, so they never go in here.
+The pictures in these docs come from `tools/demo.py`. It builds a database with made-up channels and lectures, three made-up people, two requests waiting, a shared link, a paused playlist, and a worker halfway through a lecture, and serves the real app on it, with drawn thumbnails and a still player in place of YouTube. Pictures of my own Tamlil would show what I watch and who I share it with, so they never go in here.
 
 ```sh
 docker run --rm -v "$PWD:/src:ro" -p 127.0.0.1:8499:8000 tamlil:latest python /src/tools/demo.py

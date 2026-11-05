@@ -14,9 +14,10 @@
 	request_header @outside -X-Tamlil-Tailnet
 	request_header @tailnet X-Tamlil-Tailnet 1
 
-	# Outside the tailnet: a sign-in cookie first, for everything but the sign-in page itself.
+	# Outside the tailnet: a sign-in cookie first, for everything but signing in, asking for an
+	# invite, and the transcripts someone chose to share (/s/ and /api/shared/).
 	@gate {
-		not path /login /api/auth/code /api/auth/verify /api/auth/logout /static/*
+		not path /login /join /api/auth/* /static/* /s/* /api/shared/*
 		not remote_ip 100.64.0.0/10
 	}
 	forward_auth @gate web:8000 {

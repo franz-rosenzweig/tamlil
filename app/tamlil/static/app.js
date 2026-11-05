@@ -22,6 +22,15 @@ async function api(path, opts = {}) {
 }
 let toastT;
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => t.hidden = true, 3500); }
+async function copy(text) {
+  try { await navigator.clipboard.writeText(text); toast('Copied'); }
+  catch { prompt('Copy', text); }
+}
+const svg = d => `<svg class="ico" viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true">${d}</svg>`;
+const PAUSE = svg('<rect x="3" y="2.5" width="3.6" height="11" rx="1"/><rect x="9.4" y="2.5" width="3.6" height="11" rx="1"/>');
+const PLAY = svg('<path d="M4.5 2.6v10.8c0 .6.6 1 1.1.7l8.4-5.4c.5-.3.5-1 0-1.3L5.6 1.9c-.5-.3-1.1.1-1.1.7z"/>');
+const EXPORTS = [['txt', 'Text · .txt'], ['srt', 'Subtitles · .srt'], ['vtt', 'Subtitles · .vtt'], ['json', 'JSON']];
+document.addEventListener('click', e => { for (const d of $$('details.menu[open]')) if (!d.contains(e.target)) d.open = false; });
 
 function marked(text, ranges) {
   if (!ranges || !ranges.length) return esc(text);
@@ -144,6 +153,17 @@ async function viewVideo(id, params) {
         <div class="vbtns">
           ${hitTimes.length ? `<button class="btn small" id="prev">←</button><button class="btn small" id="next">→</button>` : ''}
           <a class="btn small" id="yt" href="${ytLink(id, t)}" target="_blank" rel="noopener">YouTube ↗</a>
+          <button class="btn small" id="share" aria-expanded="false">Share</button>
+          <details class="menu"><summary class="btn small">Export</summary><div class="pop">${EXPORTS.map(([f, l]) =>
+            `<a href="/api/videos/${esc(id)}/export?format=${f}" download>${l}</a>`).join('')}</div></details>
+        </div>
+        <div class="sharebox" id="sharebox" hidden>
+          <div class="shareurl"><input type="text" id="share-url" readonly dir="ltr" aria-label="Link"><button class="btn small primary" id="share-copy">Copy</button></div>
+          <div class="shareopts">
+            <label class="check"><input type="checkbox" id="share-t" checked> <span id="share-at"></span></label>
+            ${navigator.share ? '<button class="linkish" id="share-send">Send…</button>' : ''}
+            <button class="linkish" id="share-yt">Copy YouTube link</button>
+          </div>
         </div>
       </div>
     </div>
@@ -168,8 +188,25 @@ async function viewVideo(id, params) {
     if (cur) { cur.classList.add('now'); if (scroll) cur.scrollIntoView({block: 'center', behavior: 'smooth'}); }
     $$('.tk').forEach(k => k.classList.toggle('cur', +k.dataset.seek === now));
   }
+  let shareBase = '';
+  const shareLink = () => shareBase + ($('#share-t').checked && now ? `?t=${Math.floor(now / 1000)}` : '');
+  function shareText() { $('#share-at').textContent = `At ${fmt(now)}`; if (shareBase) $('#share-url').value = shareLink(); }
+  $('#share').onclick = async () => {
+    const box = $('#sharebox'), opening = box.hidden;
+    box.hidden = !opening; $('#share').setAttribute('aria-expanded', String(opening));
+    if (!opening) return;
+    if (!shareBase) {
+      try { shareBase = (await api(`/api/videos/${id}/share`, {method: 'POST'})).url; }
+      catch (err) { toast(err.message); return; }
+    }
+    shareText(); $('#share-url').select();
+  };
+  $('#share-t').onchange = shareText;
+  $('#share-copy').onclick = () => copy(shareLink());
+  $('#share-yt').onclick = () => copy(ytLink(id, now));
+  if ($('#share-send')) $('#share-send').onclick = () => navigator.share({title: v.title, url: shareLink()}).catch(() => {});
   function seek(ms) {
-    now = ms; $('#frame').src = embed(id, ms); $('#yt').href = ytLink(id, ms);
+    now = ms; $('#frame').src = embed(id, ms); $('#yt').href = ytLink(id, ms); shareText();
     history.replaceState(null, '', `#/v/${id}?t=${ms}&q=${encodeURIComponent(q)}`);
     mark(true);
   }
@@ -186,7 +223,8 @@ async function viewLibrary() {
   const {sources, worker} = await api('/api/sources');
   const totalV = sources.reduce((a, s) => a + (s.ready || 0), 0), totalS = sources.reduce((a, s) => a + (s.seconds || 0), 0);
   const range = s => [s.date_from || '…', s.date_to || '…'].join(' → ') + (s.max_videos ? ` · ≤${s.max_videos}` : '');
-  const state = s => s.state === 'error' ? `<span class="pill bad" title="${esc(s.error)}">Error</span>`
+  const state = s => s.paused ? '<span class="pill warn">Paused</span>'
+    : s.state === 'error' ? `<span class="pill bad" title="${esc(s.error)}">Error</span>`
     : ['listing', 'new', 'more'].includes(s.state) ? '<span class="pill run">Listing</span>'
     : s.waiting ? `<span class="pill q">${s.waiting} waiting</span>` : '<span class="pill ok">Done</span>';
   $('#main').innerHTML = `
@@ -204,7 +242,7 @@ async function viewLibrary() {
           <td class="num">${s.whisper || 0}</td>
           <td class="num">${s.errors || 0}</td>
           <td>${state(s)}</td>
-          <td class="actions"><button class="icon" data-refresh="${s.id}" title="Check now">↻</button><button class="icon" data-edit="${s.id}" title="Edit">✎</button><button class="icon" data-del="${s.id}" title="Delete">✕</button></td>
+          <td class="actions"><button class="icon" data-pause="${s.id}" data-paused="${s.paused ? 1 : 0}" title="${s.paused ? 'Resume' : 'Pause'}" aria-label="${s.paused ? 'Resume' : 'Pause'}">${s.paused ? PLAY : PAUSE}</button><button class="icon" data-refresh="${s.id}" title="Check now" aria-label="Check now">↻</button><a class="icon" href="/api/sources/${s.id}/export?format=txt" download title="Export" aria-label="Export">⤓</a><button class="icon" data-edit="${s.id}" title="Edit" aria-label="Edit">✎</button><button class="icon" data-del="${s.id}" title="Delete" aria-label="Delete">✕</button></td>
         </tr>${openSource === s.id ? `<tr class="vlist"><td colspan="9" id="vlist">…</td></tr>` : ''}`;
       }).join('')}</tbody></table></div>
     <section class="add">
@@ -217,8 +255,7 @@ async function viewLibrary() {
         <label>Max<input type="number" id="f-max" min="1" placeholder="∞"></label>
         <button class="btn primary" type="submit">${editing ? 'Save' : 'Add'}</button>
       </form>
-    </section>
-    ${ME.admin ? '<section class="add" id="people"></section>' : ''}`;
+    </section>`;
   if (editing) {
     const s = sources.find(x => x.id === editing);
     if (s) { $('#f-url').value = s.url; $('#f-url').disabled = true; $('#f-lang').value = s.lang; $('#f-from').value = s.date_from || ''; $('#f-to').value = s.date_to || ''; $('#f-max').value = s.max_videos || ''; }
@@ -233,36 +270,136 @@ async function viewLibrary() {
     } catch (err) { toast({exists: 'Already in the library', link: 'Not a YouTube link'}[err.message] || err.message); }
   });
   if (openSource) loadVideos(openSource);
-  if (ME.admin) viewPeople();
 }
 
-/* ---------- people (the owner, and the tailnet) ---------- */
-async function viewPeople() {
-  const {people, mail} = await api('/api/people');
-  const el = $('#people'); if (!el) return;
-  const when = t => t ? new Date(t * 1000).toLocaleDateString(undefined, {day: 'numeric', month: 'short', year: 'numeric'}) : '';
-  el.innerHTML = `
+/* ---------- settings: your account, and for the owner (or the tailnet) people and requests ---------- */
+const SAY = {exists: 'Already on the list', email: 'Check the email', taken: 'Username taken', username: 'Username: 2–32 of a–z, 0–9, . _ -',
+  short: 'Passwords are at least 8 characters', long: 'That password is too long', current: 'Current password is wrong', mail: "Couldn't send the email",
+  throttled: 'Too many. Try later.', owner: "That's the only owner", match: "The two don't match"};
+const say = m => SAY[m] || m;
+const when = t => t ? new Date(t * 1000).toLocaleDateString(undefined, {day: 'numeric', month: 'short', year: 'numeric'}) : '';
+let pwMode = '';
+async function viewSettings() {
+  ME = await api('/api/me'); showMe();
+  const [ppl, {shares}] = await Promise.all([ME.admin ? api('/api/people') : null, api('/api/shares')]);
+  $('#main').innerHTML = `
+    <div class="lib-head"><h2>Settings</h2></div>
+    ${ME.email ? accountHTML() : ''}
+    ${ppl ? peopleHTML(ppl) : ''}
+    ${shares.length ? `<section class="add set"><h3>Shared links</h3><div class="tablewrap"><table class="lib ppl"><tbody>${shares.map(x => `<tr>
+      <td><a href="#/v/${esc(x.video_id)}"><bdi>${esc(x.title || x.video_id)}</bdi></a><div class="sub"><bdi>${esc(x.channel || '')}</bdi></div></td>
+      ${ME.admin ? `<td class="mono">${esc(x.made_by || '')}</td>` : ''}
+      <td class="mono muted">${when(x.made_at)}</td>
+      <td class="actions"><div class="acts"><button class="btn small" data-copy="${esc(x.url)}">Copy</button><button class="icon" data-unshare="${esc(x.token)}" title="Stop sharing" aria-label="Stop sharing">✕</button></div></td>
+    </tr>`).join('')}</tbody></table></div></section>` : ''}`;
+  wireSettings(ppl);
+}
+function accountHTML() {
+  return `<section class="add set">
+    <h3>Account</h3>
+    <form class="setf" id="me-f">
+      <label>Name<input type="text" id="m-name" value="${esc(ME.name || '')}" maxlength="60" autocomplete="name" dir="auto"></label>
+      <label>Username<input type="text" id="m-user" value="${esc(ME.username || '')}" maxlength="32" autocomplete="username" autocapitalize="none" spellcheck="false" required></label>
+      <label>Email<input type="email" value="${esc(ME.email)}" disabled dir="ltr"></label>
+      <button class="btn primary" type="submit">Save</button>
+    </form>
+    <div class="setrow">
+      <span class="lbl">Password</span>${ME.password ? '<span class="pill ok">On</span>' : '<span class="pill q">Off</span>'}
+      <button class="btn small" data-pw="set">${ME.password ? 'Change password' : 'Set a password'}</button>
+      ${ME.password ? '<button class="linkish dim" data-pw="remove">Remove password</button>' : ''}
+    </div>
+    <form class="setf pwf" id="pw-f" ${pwMode ? '' : 'hidden'}>
+      <input type="text" autocomplete="username" value="${esc(ME.username || ME.email)}" hidden>
+      ${ME.password ? '<label>Current password<input type="password" id="pw-cur" autocomplete="current-password" required></label>' : ''}
+      ${pwMode === 'remove' ? '' : `<label>New password<input type="password" id="pw-new" autocomplete="new-password" minlength="8" required></label>
+      <label>Again<input type="password" id="pw-again" autocomplete="new-password" minlength="8" required></label>`}
+      <div class="pwbtns"><button class="btn ${pwMode === 'remove' ? 'danger' : 'primary'}" type="submit">${pwMode === 'remove' ? 'Remove' : 'Save'}</button><button class="btn" type="button" id="pw-cancel">Cancel</button></div>
+    </form>
+    <div class="setrow">
+      <button class="btn small" id="out-others">Sign out everywhere else</button>
+      <button class="btn small" id="out">Sign out</button>
+    </div>
+  </section>`;
+}
+function peopleHTML({people, requests, settings, mail, join}) {
+  return `<section class="add set" id="people">
     <div class="lib-head"><h3>People</h3>${mail ? '' : '<span class="pill warn">No email</span>'}</div>
+    ${requests.length ? `<h4>Requests <span class="badge">${requests.length}</span></h4><div class="tablewrap"><table class="lib ppl reqs"><tbody>${requests.map(r => `<tr>
+      <td><b dir="auto">${esc(r.name)}</b><div class="sub">${esc(r.email)}</div></td>
+      <td class="mono">${esc(r.username || '')}</td>
+      <td class="note"><bdi>${esc(r.note || '')}</bdi></td>
+      <td class="mono muted">${when(r.at)}</td>
+      <td class="actions"><div class="acts"><button class="btn small" data-no="${esc(r.email)}">Decline</button><button class="btn small primary" data-yes="${esc(r.email)}">Approve</button></div></td>
+    </tr>`).join('')}</tbody></table></div>` : ''}
     ${people.length ? `<div class="tablewrap"><table class="lib ppl"><tbody>${people.map(p => `<tr>
-      <td>${esc(p.email)}</td>
-      <td class="mono">${p.username ? esc(p.username) : '<span class="pill q">Invited</span>'}</td>
-      <td>${p.owner ? '<span class="pill ok">Owner</span>' : ''}</td>
+      <td>${p.name ? `<b dir="auto">${esc(p.name)}</b><div class="sub">${esc(p.email)}</div>` : esc(p.email)}</td>
+      <td class="mono">${esc(p.username || '')}</td>
+      <td>${p.owner ? '<span class="pill ok">Owner</span> ' : ''}${p.joined ? '' : '<span class="pill q">Invited</span>'}</td>
       <td class="mono muted">${when(p.joined || p.added)}</td>
-      <td class="actions">${p.owner ? '' : `<button class="icon" data-unperson="${esc(p.email)}" title="Remove">✕</button>`}</td>
+      <td class="actions"><div class="acts">${!p.joined && mail ? `<button class="btn small" data-reinvite="${esc(p.email)}">Send again</button>` : ''}${p.owner ? '' : `<button class="icon" data-unperson="${esc(p.email)}" title="Remove" aria-label="Remove">✕</button>`}</div></td>
     </tr>`).join('')}</tbody></table></div>` : ''}
     <form class="addf pplf" id="pplf">
       <label>Email<input type="email" id="p-email" required autocomplete="off" dir="ltr"></label>
+      <label>Name<input type="text" id="p-name" autocomplete="off" maxlength="60" dir="auto"></label>
       <button class="btn primary" type="submit">Invite</button>
-    </form>`;
-  $('#pplf').addEventListener('submit', async e => {
+    </form>
+    <h4>Invite requests</h4>
+    <div class="setrow">
+      <span class="lbl">Requests</span>
+      <div class="seg" role="group" aria-label="Requests"><button type="button" data-set="requests" data-v="1" aria-pressed="${settings.requests}">Open</button><button type="button" data-set="requests" data-v="0" aria-pressed="${!settings.requests}">Closed</button></div>
+      ${settings.requests ? `<span class="mono muted joinurl">${esc(join.replace(/^https?:\/\//, ''))}</span><button class="btn small" data-copy="${esc(join)}">Copy</button>` : ''}
+    </div>
+    <div class="setrow">
+      <span class="lbl">Email me</span>
+      <div class="seg" role="group" aria-label="Email me"><button type="button" data-set="notify" data-v="1" aria-pressed="${settings.notify}">On</button><button type="button" data-set="notify" data-v="0" aria-pressed="${!settings.notify}">Off</button></div>
+    </div>
+  </section>`;
+}
+function wireSettings(ppl) {
+  const f = $('#me-f');
+  if (f) {
+    f.addEventListener('submit', async e => {
+      e.preventDefault();
+      try { await api('/api/me', {method: 'POST', body: JSON.stringify({name: $('#m-name').value, username: $('#m-user').value.trim()})}); toast('Saved'); viewSettings(); }
+      catch (err) { toast(say(err.message)); }
+    });
+    $('#pw-f').addEventListener('submit', async e => {
+      e.preventDefault();
+      const current = $('#pw-cur') ? $('#pw-cur').value : null;
+      try {
+        if (pwMode === 'remove') await api('/api/me/password/remove', {method: 'POST', body: JSON.stringify({current})});
+        else {
+          if ($('#pw-new').value !== $('#pw-again').value) { toast(say('match')); return; }
+          await api('/api/me/password', {method: 'POST', body: JSON.stringify({password: $('#pw-new').value, current})});
+        }
+        toast(pwMode === 'remove' ? 'Removed' : 'Saved'); pwMode = ''; viewSettings();
+      } catch (err) { toast(say(err.message)); }
+    });
+    $('#pw-cancel').onclick = () => { pwMode = ''; viewSettings(); };
+    $('#out-others').onclick = async () => { await api('/api/me/signout-others', {method: 'POST'}); toast('Signed out everywhere else'); };
+    $('#out').onclick = async () => { await fetch('/api/auth/logout', {method: 'POST'}); location.href = '/login'; };
+  }
+  if (ppl) $('#pplf').addEventListener('submit', async e => {
     e.preventDefault();
     try {
-      const r = await api('/api/people', {method: 'POST', body: JSON.stringify({email: $('#p-email').value.trim()})});
-      toast(r.invited ? 'Invited' : 'Added');
-      viewPeople();
-    } catch (err) { toast({exists: 'Already on the list', email: 'Check the email'}[err.message] || err.message); }
+      const r = await api('/api/people', {method: 'POST', body: JSON.stringify({email: $('#p-email').value.trim(), name: $('#p-name').value.trim() || null})});
+      toast(r.invited ? 'Invited' : 'Added'); viewSettings();
+    } catch (err) { toast(say(err.message)); }
   });
 }
+document.addEventListener('click', async e => {
+  const t = e.target.closest('[data-pw],[data-yes],[data-no],[data-reinvite],[data-set],[data-copy],[data-unshare]');
+  if (!t || !$('.set')) return;
+  try {
+    if (t.dataset.pw) { pwMode = t.dataset.pw; await viewSettings(); ($('#pw-cur') || $('#pw-new')).focus(); }
+    else if (t.dataset.yes) { const r = await api(`/api/requests/${encodeURIComponent(t.dataset.yes)}/yes`, {method: 'POST'}); toast(r.mailed ? 'Approved' : 'Approved · no email'); viewSettings(); }
+    else if (t.dataset.no) { await api(`/api/requests/${encodeURIComponent(t.dataset.no)}/no`, {method: 'POST'}); toast('Declined'); viewSettings(); }
+    else if (t.dataset.reinvite) { await api(`/api/people/${encodeURIComponent(t.dataset.reinvite)}/invite`, {method: 'POST'}); toast('Sent'); }
+    else if (t.dataset.set) { await api('/api/settings', {method: 'POST', body: JSON.stringify({[t.dataset.set]: t.dataset.v === '1'})}); viewSettings(); }
+    else if (t.dataset.copy) copy(t.dataset.copy);
+    else if (t.dataset.unshare) { await api(`/api/shares/${encodeURIComponent(t.dataset.unshare)}`, {method: 'DELETE'}); toast('Stopped'); viewSettings(); }
+  } catch (err) { toast(say(err.message)); }
+});
 document.addEventListener('click', e => {           // a result's channel: only that channel
   const c = e.target.closest('.chan[data-src]');
   if (c) go(searchHash({src: c.dataset.src}));
@@ -272,8 +409,8 @@ document.addEventListener('click', async e => {
   if (!t) return;
   if (t.dataset.armed) {
     try { await api(`/api/people/${encodeURIComponent(t.dataset.unperson)}`, {method: 'DELETE'}); toast('Removed'); }
-    catch (err) { toast(err.message); }
-    viewPeople();
+    catch (err) { toast(say(err.message)); }
+    viewSettings();
   } else { t.dataset.armed = '1'; t.textContent = 'Remove?'; t.classList.add('pill', 'bad'); setTimeout(() => { if (t.isConnected) { delete t.dataset.armed; t.textContent = '✕'; t.classList.remove('pill', 'bad'); } }, 4000); }
 });
 
@@ -288,9 +425,14 @@ async function loadVideos(id) {
       <td class="mono num">${v.duration ? fmt(v.duration * 1000) : ''}</td><td>${LANG[v.lang] || ''}</td><td>${st(v)}</td></tr>`).join('')}</tbody></table>` : '<span class="muted">0</span>';
 }
 document.addEventListener('click', async e => {
-  const t = e.target.closest('[data-open],[data-refresh],[data-edit],[data-del],[data-retry]');
+  const t = e.target.closest('[data-open],[data-refresh],[data-edit],[data-del],[data-retry],[data-pause]');
   if (!t || !$('.lib')) return;
-  if (t.dataset.open) { openSource = openSource === +t.dataset.open ? null : +t.dataset.open; viewLibrary(); }
+  if (t.dataset.pause) {
+    const off = t.dataset.paused === '1';
+    await api(`/api/sources/${t.dataset.pause}/pause`, {method: 'POST', body: JSON.stringify({paused: !off})});
+    toast(off ? 'Resumed' : 'Paused'); viewLibrary(); pollWorker();
+  }
+  else if (t.dataset.open) { openSource = openSource === +t.dataset.open ? null : +t.dataset.open; viewLibrary(); }
   else if (t.dataset.refresh) { await api(`/api/sources/${t.dataset.refresh}/refresh`, {method: 'POST'}); toast('Queued'); viewLibrary(); }
   else if (t.dataset.edit) { editing = +t.dataset.edit; await viewLibrary(); $('#addf').scrollIntoView({behavior: 'smooth'}); }
   else if (t.dataset.del) {
@@ -327,15 +469,18 @@ async function route() {
   try {
     if (screen === 'v' && parts[1]) await viewVideo(parts[1], params);
     else if (screen === 'library') await viewLibrary();
+    else if (screen === 'settings') await viewSettings();
     else await viewSearch(params);
   } catch (err) { $('#main').innerHTML = `<div class="empty">${esc(err.message)}</div>`; }
   window.scrollTo(0, 0);
 }
 document.addEventListener('keydown', e => { if (e.key === '/' && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) { e.preventDefault(); go('/search'); setTimeout(() => $('#q')?.focus(), 50); } });
 window.addEventListener('hashchange', route);
-$('#signout').addEventListener('click', async () => { await fetch('/api/auth/logout', {method: 'POST'}); location.href = '/login'; });
+function showMe() {
+  $('#me').textContent = ME.username || ''; $('#me').hidden = !ME.username;
+  $('#waiting').textContent = ME.waiting || ''; $('#waiting').hidden = !ME.waiting;
+}
 Promise.all([api('/api/config').then(c => { CFG = c; }), api('/api/me').then(m => { ME = m; })]).catch(() => {}).finally(() => {
-  if (ME.username) { $('#me').textContent = ME.username; $('#me').hidden = false; $('#signout').hidden = false; }
-  route(); pollWorker(); setInterval(pollWorker, 5000);
+  showMe(); route(); pollWorker(); setInterval(pollWorker, 5000);
 });
 })();

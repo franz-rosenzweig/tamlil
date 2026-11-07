@@ -62,6 +62,29 @@ create table if not exists share(
   made_by text,
   made_at integer
 );
+create table if not exists chat(
+  id integer primary key,
+  who text not null,
+  title text,
+  video_id text,
+  source_id integer,
+  context text,
+  made_at integer,
+  updated_at integer
+);
+create table if not exists chat_msg(
+  id integer primary key,
+  chat_id integer references chat(id) on delete cascade,
+  role text,
+  text text,
+  refs text,
+  engine text,
+  model text,
+  cost real,
+  at integer
+);
+create index if not exists chat_who on chat(who, updated_at);
+create index if not exists chat_msg_chat on chat_msg(chat_id, id);
 create index if not exists video_source on video(source_id);
 create index if not exists video_state on video(state);
 create index if not exists chunk_video on chunk(video_id);

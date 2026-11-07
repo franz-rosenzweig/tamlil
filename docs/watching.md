@@ -11,6 +11,7 @@ Clicking a moment opens the video at that line, with its whole transcript under 
 - **The ticks** under the player are every match in this video. Click one to jump there. The one you're on is yellow.
 - **← →** go to the previous or the next match.
 - **YouTube ↗** opens the same moment on YouTube.
+- **Ask** opens a chat with Claude about this video (see [Chat](chat.md)).
 - **← and the search**, above the player, go back to the results.
 
 Next to the player are the channel, the date, the length, the language, where the text came from (with ivrit.ai when it's Hebrew Whisper), and how many lines matched.
@@ -37,4 +38,4 @@ There's one link per video, so sharing it again gives the same link with a new t
 
 A whole channel can be exported from the Library too (see [The Library](the-library.md#exporting-a-source)).
 
-<sub>Next: [Signing in, people and Settings](people.md)</sub>
+<sub>Next: [Chat](chat.md)</sub>

@@ -174,6 +174,20 @@ PEOPLE = [("dana@example.com", "dana", "Dana Mizrahi"), ("yoni@example.com", "yo
 ASKING = [("noam@example.com", "Noam Shapira", "noam.s", "From the Thursday night shiur", 3 * 3600),
           ("ruth.b@example.com", "Ruth Ben-David", "ruthbd", "Dana's sister", 26 * 3600)]
 
+# Two chats, as Claude answered them on this demo (through Claude Code): one about the whole library,
+# one about a single lecture with a follow-up.
+CHATS = [
+    (None, [
+        ('user', "Where do the lectures talk about the firmament dividing the waters, and what do they say?"),
+        ('assistant', "Two lectures cover this. Both are about day two of creation, Genesis 1:6–8.\n\n**\"בריאת הרקיע · שיעור 3\" (בית מדרש בראשית, Hebrew)**\n- It reads the verse \"יהי רקיע בתוך המים, ויהי מבדיל בין מים למים\" ([0:18](#dmRakia0003@0:18)).\n- It traces \"רקיע\" to the root ר־ק־ע, meaning to beat or stretch something thin. It compares Exodus, \"וירקעו את פחי הזהב\". So the firmament is \"something stretched, something that separates\" ([0:40](#dmRakia0003@0:40)).\n- It points out that there are waters below the firmament and waters above it ([1:21](#dmRakia0003@1:21)). The question of what the upper waters are is left for the following week.\n- Rashi says the heavens were created on day one but were still liquid, and only set firm on day two ([1:53](#dmRakia0003@1:53)).\n- On why day two lacks \"כי טוב\", it gives two reasons. Rashi says the work on the waters wasn't finished until day three. A midrash says day two created division, and separation alone isn't yet good ([2:18](#dmRakia0003@2:18)).\n\n**\"Day Two: What Is the Firmament?\" (Genesis Close Reading, English)**\n- It explains that *rakia* comes from a verb meaning to beat out or hammer flat, like a smith hammering gold into a thin sheet. It cites the same root in Exodus ([0:10](#dmFirmamnt2@0:10)).\n- It quotes \"let it divide the waters from the waters\" ([0:50](#dmFirmamnt2@0:50)). It notes there are waters under the firmament and waters above it ([1:07](#dmFirmamnt2@1:07)).\n- It links the \"heaven\" of verse one to the firmament of day two. One reading says the heavens were made on day one but only set firm on day two ([1:26](#dmFirmamnt2@1:26)).\n- The English word \"firmament\" comes from the Latin *firmus*, \"solid\" ([1:42](#dmFirmamnt2@1:42)).\n- The next lecture is on the waters above the heavens.\n\nThe two lectures make nearly the same points. The Hebrew one adds the discussion of \"כי טוב\" and the midrash on division."),
+    ]),
+    ('dmRakia0003', [
+        ('user', "מה אומר השיעור על כי טוב ביום השני?"),
+        ('assistant', "השיעור מציין שביום השני לא כתוב \"כי טוב\" ([2:18](#dmRakia0003@2:18)), ומביא שני הסברים:\n\n- **רש\"י:** זה בגלל שמלאכת המים לא נגמרה עד היום השלישי ([2:26](#dmRakia0003@2:26)).\n- **מדרש:** ביום השני נבראה מחלוקת, כלומר הפרדה. הרקיע מבדיל, והבדלה לבדה היא עוד לא טוב ([2:33](#dmRakia0003@2:33)).\n\nבהמשך, כשהמים מתכנסים למקום אחד ביום השלישי, נאמר \"כי טוב\" פעמיים ([2:48](#dmRakia0003@2:48))."),
+        ('user', "And what does Rashi say there, in one sentence?"),
+        ('assistant', "Rashi says that \"ki tov\" is missing on the second day because the work of the waters wasn't finished until the third day ([2:26](#dmRakia0003@2:26))."),
+    ]),
+]
 
 def timings(lines):
     """Spoken-ish timestamps: about 0.42 s a word, with pauses that vary."""
@@ -227,6 +241,15 @@ def build(data: Path):
     db.execute("update source set paused=1 where id=3")              # the playlist, paused
     db.execute("insert into share(token, video_id, made_by, made_at) values ('demo-share-link', ?, 'dana', ?)",
                (VIDEOS[0][1], now - 86400))
+    from tamlil import chat
+    chat.set_settings(engine="claude", token="sk-ant-oat01-demo-" + "0" * 30, everyone=True)
+    for i, (video_id, turns) in enumerate(CHATS):
+        c = chat.new_chat(PEOPLE[0][0], video_id=video_id)
+        at = now - 3600 * (len(CHATS) - i)
+        for role, text in turns:
+            db.execute("insert into chat_msg(chat_id, role, text, refs, at) values (?,?,?,?,?)",
+                       (c["id"], role, text, json.dumps(chat._refs(text), ensure_ascii=False) if role == "assistant" else None, at))
+        db.execute("update chat set title=?, updated_at=? where id=?", (turns[0][1][:90], at, c["id"]))
     return db, accounts._cookie(d, d["people"][0])
 
 

@@ -5,7 +5,9 @@
 }
 
 :80 {
-	encode gzip
+	# Everything but a chat answer, which streams word by word and mustn't wait for a gzip block.
+	@compress not path /api/chats/*/ask
+	encode @compress gzip
 
 	# The tailnet gets in without signing in, and Tamlil is told so (the owner's tools work there).
 	# Everyone else has the header taken off, so nobody can claim it.

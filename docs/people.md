@@ -36,7 +36,9 @@ I get an email about each request, and when I say yes, they get one that says th
 - **Sign out everywhere else** signs out every other browser and phone, and keeps this one.
 - **Sign out.**
 
-![Settings: the account, then People with two requests waiting](images/settings.png)
+The owner also sees **Chat** there, which is where chat is turned on (see [Chat](chat.md#turning-it-on)).
+
+![Settings: the account, Chat answered by Claude Code, then People with two requests waiting](images/settings.png)
 
 ## People, for the owner
 

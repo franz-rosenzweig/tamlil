@@ -42,7 +42,7 @@ services:
     <<: *app
     build: ./app
     container_name: tamlil-web
-    mem_limit: 1g
+    mem_limit: 2g    # room for a chat answer or two from Claude Code
 
   # The one front door: Tamlil and its player on the same address (:8445).
   gateway:

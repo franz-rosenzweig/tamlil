@@ -19,6 +19,7 @@ The name is the Hebrew תמליל, a transcript.
 
 - Add the channels and set their dates, in the Library.
 - Search, and open the moments I want. See [Searching](searching.md) and [Watching](watching.md).
+- Ask Claude about the videos when I remember the idea but not the words. See [Chat](chat.md).
 - Invite the few people who use it with me. See [Signing in, people and Settings](people.md).
 
 ## Where I open it

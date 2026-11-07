@@ -5,3 +5,5 @@ faster-whisper==1.2.1
 av==15.1.0          # av 19 dropped the metadata_errors option faster-whisper 1.2.1 passes
 numpy
 pytest
+anthropic==2.6.0          # chat, with an API key
+claude-agent-sdk==0.2.179 # chat, with a Claude Code token (it brings its own Claude Code)

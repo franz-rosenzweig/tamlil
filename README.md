@@ -7,6 +7,7 @@
   <img src="https://img.shields.io/badge/web-app-2851C8?style=flat-square" alt="Web app">
   <img src="https://img.shields.io/badge/Hebrew%20%C2%B7%20English-search-2851C8?style=flat-square" alt="Hebrew and English search">
   <img src="https://img.shields.io/badge/Whisper-on%20the%20CPU-FFD43B?style=flat-square" alt="Whisper on the CPU">
+  <img src="https://img.shields.io/badge/chat-Claude-2851C8?style=flat-square" alt="Chat with Claude">
   <img src="https://img.shields.io/badge/license-MIT-555555?style=flat-square" alt="MIT license">
 </p>
 <p align="center">
@@ -34,6 +35,7 @@ So Tamlil (תמליל, Hebrew for a transcript) keeps an eye on the few channels
 - **Search that knows Hebrew:** it finds שמים in השמים and ושמים, in שמיים, and with or without niqqud, and tells you which kind of match each one is. A channel, words in the title and dates narrow it down, sorted by best match, newest, oldest or most moments. See [Searching](docs/searching.md).
 - **Opens at the moment:** a private player starts at the line, with the whole transcript under it, a tick on the timeline for every match, and ← → to step through them. See [Watching](docs/watching.md).
 - **Its own VPN:** everything that talks to YouTube goes through the stack's own gluetun, so it never uses the server's own address.
+- **Ask Claude:** a chat about the videos. Claude searches and reads the transcripts and answers with the moments it got it from, through an API key or the owner's own Claude plan with Claude Code. See [Chat](docs/chat.md).
 - **Share and export:** a link to a transcript that anyone can open, and every transcript as text, subtitles (`.srt`, `.vtt`) or JSON, one video or a whole channel. See [Watching](docs/watching.md#sharing-and-exporting).
 - **Pause a channel:** it keeps everything it has and the worker skips it, until it's picked up again.
 - **Invite only:** I invite people by email, or they ask for an invite and I say yes. They sign in with a code by email or a password, and Settings has their account. See [Signing in, people and Settings](docs/people.md).
@@ -42,9 +44,11 @@ So Tamlil (תמליל, Hebrew for a transcript) keeps an eye on the few channels
 
 <img src="docs/images/video.png" alt="A lecture open at 1:04: the player, a tick on the timeline for each of its 11 matches, and the transcript with each match highlighted">
 
+<img src="docs/images/chat.png" alt="A chat: a question about the firmament, and an answer about two lectures with a yellow time after each point and the two videos under it">
+
 <img src="docs/images/library.png" alt="The Library: three sources with their language, range, how much is searchable, how many went through Whisper, and their state, with one paused, then Add">
 
-<img src="docs/images/settings.png" alt="Settings: the account with its name, username, email and password, then People with two requests to approve or decline">
+<img src="docs/images/settings.png" alt="Settings: the account with its name, username, email and password, Chat answered by Claude Code, then People with two requests to approve or decline">
 
 <p align="center"><img src="docs/images/phone.png" width="320" alt="Searching רקיע on a phone"> <img src="docs/images/email.png" width="320" alt="The invite email, in Tamlil's colors"></p>
 
@@ -66,13 +70,13 @@ Whisper runs on the CPU, so it's slow: about 25 minutes for an hour of Hebrew on
 
 ## How it's built
 
-- `app/tamlil/`: the app, in Python. `web.py` is the page's server (FastAPI), `worker.py` lists the channels and gets the transcripts, `fetch.py` talks to YouTube through yt-dlp, `transcribe.py` runs faster-whisper, `hebrew.py` is the Hebrew matching, `search.py` searches SQLite's full-text index, `links.py` turns YouTube, Invidious and Materialious links into YouTube's own, `export.py` writes the transcripts out, and `accounts.py`, `emails.py` and `mail.py` are the accounts, the invites and the emails.
+- `app/tamlil/`: the app, in Python. `web.py` is the page's server (FastAPI), `worker.py` lists the channels and gets the transcripts, `fetch.py` talks to YouTube through yt-dlp, `transcribe.py` runs faster-whisper, `hebrew.py` is the Hebrew matching, `search.py` searches SQLite's full-text index, `links.py` turns YouTube, Invidious and Materialious links into YouTube's own, `export.py` writes the transcripts out, `chat.py` is the chat with Claude, and `accounts.py`, `emails.py` and `mail.py` are the accounts, the invites and the emails.
 - `app/tamlil/static/`: the page, in plain HTML, CSS and JavaScript.
 - `gateway/`: Caddy in front of everything, so the app and its player share one address and one sign-in.
 - `invidious/`: the player's database setup, from Invidious.
 - `app/tests/`: the tests. `tools/demo.py`: the demo for the pictures.
 
-Everything it keeps is in one folder (the database, the people, and the mail settings), so nothing secret lives in this repo. More in [Developing and running it](docs/DEVELOPING.md).
+Everything it keeps is in one folder (the database, the people, the mail settings, and the key or token for the chat), so nothing secret lives in this repo. More in [Developing and running it](docs/DEVELOPING.md).
 
 ## License
 

@@ -6,11 +6,11 @@ from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException, Request, Response
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import accounts, config, export
+from . import accounts, chat, config, export
 from .links import to_youtube
 from .db import connect, get_status
 from .search import search, video_hits
@@ -174,7 +174,8 @@ def api_me(request: Request):
     admin = tailnet or bool(p and p["owner"])
     r = JSONResponse({"username": p and p["username"], "email": p and p["email"], "name": p and p["name"],
                       "password": bool(p and p["password"]), "owner": bool(p and p["owner"]),
-                      "tailnet": tailnet, "admin": admin, "waiting": len(accounts.requests()) if admin else 0})
+                      "tailnet": tailnet, "admin": admin, "waiting": len(accounts.requests()) if admin else 0,
+                      "chat": chat.allowed(p, tailnet)})
     if p and p["renew"]:                       # slide the 180 days forward, once a day
         _set_cookie(r, request, accounts.renew(request.cookies.get(accounts.COOKIE)))
     return r
@@ -245,6 +246,7 @@ def api_people_invite(email: str, request: Request):
 def api_people_remove(email: str, request: Request):
     _owner_only(request)
     _do(accounts.remove, email)
+    chat.forget(accounts.clean_email(email))
     return {"ok": True}
 
 
@@ -503,6 +505,90 @@ def shared_export(token: str, format: str = "txt"):
     fmt = _fmt(format)
     v, segs = _shared(token)
     return _download(export.render(v, segs, fmt), export.filename(v, fmt), export.FORMATS[fmt])
+
+
+# ---------- chat: questions about the transcripts, answered by Claude ----------
+
+CHAT_STATUS = {"missing": 404, "video": 404, "source": 404, "off": 403, "day": 429}
+
+
+def _chatter(request: Request) -> tuple[str, bool]:
+    """Whose chats these are (the tailnet has its own), and whether that's the owner."""
+    p, tailnet = _me(request)
+    if not chat.allowed(p, tailnet):
+        raise HTTPException(403, "chat")
+    return (p["email"] if p else "tailnet"), bool(tailnet or p["owner"])
+
+
+def _chat_do(fn, *a, **kw):
+    try:
+        return fn(*a, **kw)
+    except chat.Refused as e:
+        raise HTTPException(CHAT_STATUS.get(str(e), 400), str(e))
+
+
+class NewChat(BaseModel):
+    video_id: str | None = None
+    source_id: int | None = None
+
+
+class Question(BaseModel):
+    text: str
+
+
+@app.get("/api/chats")
+def api_chats(request: Request):
+    return {"chats": chat.chats(_chatter(request)[0])}
+
+
+@app.post("/api/chats")
+def api_chat_new(body: NewChat, request: Request):
+    return _chat_do(chat.new_chat, _chatter(request)[0], body.video_id, body.source_id)
+
+
+@app.get("/api/chats/{chat_id}")
+def api_chat(chat_id: int, request: Request):
+    return _chat_do(chat.get_chat, _chatter(request)[0], chat_id)
+
+
+@app.delete("/api/chats/{chat_id}")
+def api_chat_delete(chat_id: int, request: Request):
+    chat.delete_chat(_chatter(request)[0], chat_id)
+    return {"ok": True}
+
+
+@app.post("/api/chats/{chat_id}/ask")
+def api_chat_ask(chat_id: int, body: Question, request: Request):
+    who, owner = _chatter(request)
+    c, cfg, engine, q = _chat_do(chat.start, who, chat_id, body.text, owner)
+    return StreamingResponse(chat.answer(who, c, cfg, engine, q, gone=request.is_disconnected),
+                             media_type="text/event-stream", headers={"cache-control": "no-cache", "x-accel-buffering": "no"})
+
+
+@app.post("/api/chats/stop")
+def api_chat_stop(request: Request):
+    chat.stop(_chatter(request)[0])
+    return {"ok": True}
+
+
+class ChatSettings(BaseModel):
+    engine: str | None = None
+    api_key: str | None = None
+    token: str | None = None
+    model: str | None = None
+    everyone: bool | None = None
+
+
+@app.get("/api/chat/settings")
+def api_chat_settings(request: Request):
+    _owner_only(request)
+    return chat.settings()
+
+
+@app.post("/api/chat/settings")
+def api_chat_settings_save(body: ChatSettings, request: Request):
+    _owner_only(request)
+    return _chat_do(chat.set_settings, **body.model_dump(exclude_none=True))
 
 
 app.mount("/static", StaticFiles(directory=STATIC), name="static")

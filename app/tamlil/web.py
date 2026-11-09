@@ -1,3 +1,4 @@
+import hashlib
 import re
 import secrets
 import threading
@@ -6,7 +7,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException, Request, Response
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -165,7 +166,7 @@ def auth_logout():
 @app.get("/login")
 @app.get("/join")
 def login_page():
-    return FileResponse(STATIC / "login.html")
+    return _page("login.html")
 
 
 @app.get("/api/me")
@@ -491,7 +492,7 @@ def _shared(token: str):
 
 @app.get("/s/{token}")
 def shared_page(token: str):
-    return FileResponse(STATIC / "share.html", headers={"x-robots-tag": "noindex", "referrer-policy": "no-referrer"})
+    return _page("share.html", {"x-robots-tag": "noindex", "referrer-policy": "no-referrer"})
 
 
 @app.get("/api/shared/{token}")
@@ -662,8 +663,19 @@ async def api_chat_connection_models(cid: int, request: Request, fresh: int = 0)
 
 
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
+_ASSET = re.compile(r'(/static/[\w.-]+\.(?:css|js))"')
+
+
+def _page(name: str, headers: dict | None = None) -> HTMLResponse:
+    """A page with ?v=<a hash of the file> on each script and stylesheet. Cloudflare and browsers keep
+    /static files for hours, so a release changes their addresses instead of waiting for that to run out."""
+    def stamp(m):
+        f = STATIC / m.group(1).removeprefix("/static/")
+        return f'{m.group(1)}?v={hashlib.sha1(f.read_bytes()).hexdigest()[:10]}"' if f.is_file() else m.group(0)
+    html = _ASSET.sub(stamp, (STATIC / name).read_text(encoding="utf-8"))
+    return HTMLResponse(html, headers={"cache-control": "no-cache", **(headers or {})})
 
 
 @app.get("/")
 def index():
-    return FileResponse(STATIC / "index.html")
+    return _page("index.html")

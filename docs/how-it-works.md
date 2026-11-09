@@ -22,7 +22,7 @@ Every transcript is cut into 30-second stretches that overlap by half, and each 
 
 - Everything that talks to YouTube, the worker and the player both, goes through the stack's own VPN (gluetun), never the server's own address.
 - The worker waits 4 seconds between requests, and lists a channel 10 videos at a time.
-- When YouTube turns the VPN away (its bot check, or too many requests), the worker asks gluetun for another server, at most once in 20 minutes, and otherwise waits 45 minutes. Changing servers needs `GLUETUN_KEY` (see `.env.example`); without it, it only waits.
+- When YouTube turns the VPN away (its bot check, or too many requests), the worker asks gluetun for another server, at most once in 10 minutes, and otherwise waits half an hour. Changing servers needs `GLUETUN_KEY` (see `.env.example`); without it, it only waits.
 - yt-dlp, which does the talking, updates itself once a day, since YouTube changes things often.
 
 ## The player

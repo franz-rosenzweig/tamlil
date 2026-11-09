@@ -20,8 +20,8 @@ KNOWN_STOP = 5      # consecutive already-known videos that end an incremental l
 OLDER_STOP = 3      # consecutive videos older than date_from that end a listing
 LIST_BATCH = 10     # new videos per listing pass; their transcripts come before the next pass
 MAX_ATTEMPTS = 3
-BLOCK_WAIT = 45 * 60      # how long to leave YouTube alone after it turns this address away
-SWITCH_GAP = 20 * 60      # at most one VPN server change in this long
+BLOCK_WAIT = 30 * 60      # how long to leave YouTube alone after it turns this address away
+SWITCH_GAP = 10 * 60      # at most one VPN server change in this long
 
 
 class Paused(Exception):

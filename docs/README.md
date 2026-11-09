@@ -12,7 +12,7 @@ These pages are how Tamlil works, written down. It searches YouTube videos by wh
 - [The Library](the-library.md): adding a channel, its dates and its limit, and what happens next
 - [Searching](searching.md): the search box, the results, and how Hebrew words match
 - [Watching](watching.md): the player, the transcript, stepping through the matches, and sharing and exporting
-- [Chat](chat.md): asking Claude or another model about the videos, and turning it on with Claude Code, a key, OpenRouter or Ollama
+- [Chat](chat.md): asking Claude or another model about the videos, and turning it on with Claude Code, ChatGPT, a key, OpenRouter or Ollama
 - [Signing in, people and Settings](people.md): codes and passwords, your account, themes, inviting people and asking for an invite
 
 ### Under the hood

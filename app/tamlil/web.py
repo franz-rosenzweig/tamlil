@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Stre
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import accounts, chat, config, export
+from . import accounts, chat, chatgpt, config, export
 from .links import to_youtube
 from .db import connect, get_status
 from .search import search, video_hits
@@ -610,9 +610,45 @@ def api_chat_connection_edit(cid: int, body: Connection, request: Request):
 
 
 @app.delete("/api/chat/connections/{cid}")
-def api_chat_connection_delete(cid: int, request: Request):
+async def api_chat_connection_delete(cid: int, request: Request):
     _owner_only(request)
+    if any(c["id"] == cid and c["preset"] == "chatgpt" for c in chat.settings()["connections"]):
+        await chatgpt.disconnect()                  # signs out at OpenAI too
     return chat.delete_connection(cid)
+
+
+# ChatGPT's sign-in (see chatgpt.py): start, then finish from the address the browser landed on,
+# pasted, or right here when the browser is on this computer.
+
+class Callback(BaseModel):
+    url: str = ""
+
+
+@app.post("/api/chat/chatgpt/start")
+def api_chatgpt_start(request: Request):
+    _owner_only(request)
+    return {"url": chatgpt.start()}
+
+
+@app.post("/api/chat/chatgpt/finish")
+async def api_chatgpt_finish(body: Callback, request: Request):
+    _owner_only(request)
+    try:
+        await chatgpt.finish(chatgpt.parse_callback(body.url))
+    except chatgpt.SignInError as e:
+        raise HTTPException(400, f"signin-{e}") from None
+    return chat.chatgpt_signed_in()
+
+
+@app.get("/auth/callback")
+async def api_chatgpt_callback(request: Request):
+    _owner_only(request)
+    try:
+        await chatgpt.finish(dict(request.query_params))
+        chat.chatgpt_signed_in()
+        return RedirectResponse("/#/settings")
+    except chatgpt.SignInError as e:
+        return RedirectResponse(f"/#/settings?chatgpt={e}")
 
 
 @app.get("/api/chat/connections/{cid}/models")

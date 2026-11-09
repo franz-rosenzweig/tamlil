@@ -64,7 +64,7 @@ The first address on the list is the owner's. `list` shows the requests waiting 
 Everything is in `DATA_DIR`:
 
 - `tamlil.db`: the sources, videos, transcripts, the index, the shared links and the chats (SQLite).
-- `accounts.json`: the people (with scrypt hashes for anyone who set a password), the requests, the two settings for requests, and the cookie secret. It, `mail.json` and `chat.json` (the chat's connections, with their keys and the Claude Code token) are all mode 600.
+- `accounts.json`: the people (with scrypt hashes for anyone who set a password), the requests, the two settings for requests, and the cookie secret. It, `mail.json`, `chat.json` (the chat's connections, with their keys and the Claude Code token) and `chatgpt.json` (ChatGPT's sign-in) are all mode 600.
 - `tmp/` for audio while it's transcribed, `cache/` for yt-dlp, and `pylib/` for the daily yt-dlp.
 
 After changing the Hebrew rules in `hebrew.py`, rebuild the index from the saved transcripts:
@@ -79,7 +79,7 @@ docker exec tamlil-web python -m tamlil.reindex
 docker compose build web && docker run --rm -e TAMLIL_DATA=/tmp tamlil:latest python -m pytest -q tests
 ```
 
-They cover the Hebrew matching, the caption parser, the index, the search filters and sorting, the links from YouTube, Invidious and Materialious, the accounts, codes and passwords, asking for an invite, the emails, export, listing in batches, and the chat (its tools, its settings and connections, the model lists, and answers with tool calls through a Claude key and through OpenRouter, against stand-ins for both).
+They cover the Hebrew matching, the caption parser, the index, the search filters and sorting, the links from YouTube, Invidious and Materialious, the accounts, codes and passwords, asking for an invite, the emails, export, listing in batches, and the chat (its tools, its settings and connections, the model lists, the ChatGPT sign-in, and answers with tool calls through a Claude key, OpenRouter and a ChatGPT plan, against stand-ins for each).
 
 ## The demo
 

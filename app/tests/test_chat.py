@@ -343,3 +343,102 @@ def test_openai_format_turned_down(db, monkeypatch):
     assert out[-1][1]["text"] == "Hi." and "stream_options" in bodies[0] and "stream_options" not in bodies[1]
     out = run(chat.answer(OWNER["email"], *chat.start(OWNER["email"], c["id"], "Again", True)))
     assert ("error", {"code": "tools"}) in out
+
+
+# ---------- a ChatGPT plan, against a stand-in for OpenAI ----------
+
+from urllib.parse import parse_qs, urlparse  # noqa: E402
+
+import jwt  # noqa: E402
+from cryptography.hazmat.primitives.asymmetric import rsa  # noqa: E402
+
+from tamlil import chatgpt  # noqa: E402
+
+KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+JWK = {**json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(KEY.public_key())), "kid": "k1"}
+
+
+class FakeOpenAI:
+    def __init__(self):
+        self.nonce, self.bodies, self.rounds, self.expired = None, [], [], False
+
+    def __call__(self, req):
+        url = str(req.url)
+        if url.endswith("/.well-known/openid-configuration"):
+            return httpx.Response(200, json={"issuer": "https://auth.openai.com", "jwks_uri": "https://auth.openai.com/jwks",
+                                             "revocation_endpoint": "https://auth.openai.com/revoke"})
+        if url.endswith("/jwks"):
+            return httpx.Response(200, json={"keys": [JWK]})
+        if url.endswith("/oauth/token"):
+            form = parse_qs(req.content.decode())
+            if form["grant_type"] == ["authorization_code"]:
+                assert form["redirect_uri"] == ["http://127.0.0.1:8445/auth/callback"]
+                idt = jwt.encode({"iss": "https://auth.openai.com", "aud": "oaiapp_1", "sub": "u1", "email": "a@b.c",
+                                  "nonce": self.nonce, "exp": time.time() + 600}, KEY, algorithm="RS256", headers={"kid": "k1"})
+                return httpx.Response(200, json={"id_token": idt, "access_token": "at-1", "refresh_token": "rt-1",
+                                                 "expires_in": 3600, "scope": chatgpt.SCOPES})
+            return httpx.Response(200, json={"access_token": "at-2", "refresh_token": "rt-2", "expires_in": 3600})
+        if url.endswith("/v1/models"):
+            return httpx.Response(200, json={"models": [{"slug": "gpt-x", "display_name": "GPT X"},
+                                                       {"slug": "hidden", "visibility": "hide"}]})
+        if url.endswith("/v1/responses"):
+            if self.expired:
+                self.expired = False
+                return httpx.Response(401, json={"error": {"message": "expired"}})
+            self.bodies.append((req.headers["authorization"], json.loads(req.content)))
+            events = self.rounds.pop(0)
+            return httpx.Response(200, content="".join(f"event: {e['type']}\ndata: {json.dumps(e, ensure_ascii=False)}\n\n"
+                                                       for e in events).encode(), headers={"content-type": "text/event-stream"})
+        if url.endswith("/revoke"):
+            return httpx.Response(200)
+        return httpx.Response(404)
+
+
+def test_chatgpt_sign_in_and_answer(db, monkeypatch):
+    fake = FakeOpenAI()
+    t = httpx.MockTransport(fake)
+    monkeypatch.setattr(chatgpt, "_transport", t)
+    monkeypatch.setattr(chat, "_transport", t)
+    with pytest.raises(chat.Refused):
+        chat.add_connection(preset="chatgpt")                        # only through the sign-in
+    q = {k: v[0] for k, v in parse_qs(urlparse(chatgpt.start()).query).items()}
+    assert q["client_id"] == "dynamic_agent_client" and q["agent_name_hint"] == "Tamlil" and q["ext_agent_host_id"]
+    assert q["redirect_uri"] == "http://127.0.0.1:8445/auth/callback" and "chatgpt.tokens.use.direct" in q["scope"]
+    fake.nonce = q["nonce"]
+    with pytest.raises(chatgpt.SignInError, match="state"):
+        asyncio.run(chatgpt.finish(chatgpt.parse_callback("http://127.0.0.1:8445/auth/callback?code=c&state=nope")))
+    asyncio.run(chatgpt.finish(chatgpt.parse_callback(
+        f"http://127.0.0.1:8445/auth/callback?code=c&state={q['state']}&client_id=oaiapp_1")))
+    assert (chat.config.DATA / "chatgpt.json").stat().st_mode & 0o777 == 0o600
+    s = chat.chatgpt_signed_in()
+    assert s["connections"] == [{"id": 1, "preset": "chatgpt", "name": "ChatGPT", "key": "a@b.c", "base_url": ""}]
+    assert chat.chatgpt_signed_in()["added"] == 1 and len(chat.settings()["connections"]) == 1      # made once
+    assert asyncio.run(chat.models(1)) == [{"id": "gpt-x", "name": "GPT X"}]
+    q2 = {k: v[0] for k, v in parse_qs(urlparse(chatgpt.start()).query).items()}
+    assert q2["client_id"] == "oaiapp_1" and "agent_name_hint" not in q2 and q2["login_hint"] == "a@b.c"
+
+    chat.set_settings(on=True, model="1/gpt-x")
+    call = {"type": "function_call", "id": "fc_1", "call_id": "call_1", "name": "search", "arguments": '{"query": "רקיע"}'}
+    thought = {"type": "reasoning", "id": "rs_1", "summary": [], "encrypted_content": "enc"}
+    fake.rounds = [
+        [{"type": "response.output_item.done", "item": thought}, {"type": "response.output_item.done", "item": call},
+         {"type": "response.completed", "response": {"output": [thought, call]}}],
+        [{"type": "response.output_text.delta", "delta": "It's in "}, {"type": "response.output_text.delta", "delta": "[0:10](#a1@0:10)."},
+         {"type": "response.completed", "response": {}}],
+    ]
+    fake.expired = True                                                # the first try finds the token run out
+    c = chat.new_chat(OWNER["email"])
+    out = run(chat.answer(OWNER["email"], *chat.start(OWNER["email"], c["id"], "Where?", True)))
+    assert [k for k, _ in out] == ["start", "tool", "text", "text", "done"] and out[-1][1]["text"] == "It's in [0:10](#a1@0:10)."
+    (auth1, first), (auth2, second) = fake.bodies
+    assert auth1 == auth2 == "Bearer at-2" and chatgpt.load()["refresh_token"] == "rt-2"
+    assert first["store"] is False and first["stream"] and first["include"] == ["reasoning.encrypted_content"]
+    assert first["input"] == [{"role": "user", "content": "Where?"}] and "library's channels" in first["instructions"]
+    assert [t["name"] for t in first["tools"]] == ["search", "transcript", "videos"] and first["tool_choice"] == "auto"
+    back = second["input"]
+    assert back[1] == {"type": "reasoning", "summary": [], "encrypted_content": "enc"}           # whole, without its id
+    assert back[2] == {k: v for k, v in call.items() if k != "id"}
+    assert back[3]["type"] == "function_call_output" and back[3]["call_id"] == "call_1" and "a1 · בריאת הרקיע" in back[3]["output"]
+
+    assert asyncio.run(chatgpt.disconnect()) is True and chatgpt.load() is None
+    assert not chat.settings()["ready"]

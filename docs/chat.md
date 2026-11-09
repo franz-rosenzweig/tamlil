@@ -2,7 +2,7 @@
 
 # Chat
 
-Search is for when I remember the words. Chat is for when I remember the idea: I ask Claude a question about the videos (or another model, through OpenRouter, Ollama and the like), and it looks through the transcripts for me. It searches them the same way the search box does, reads the parts it needs, and answers with the moments it got them from. Every yellow time in an answer opens the video right there.
+Search is for when I remember the words. Chat is for when I remember the idea: I ask Claude a question about the videos (or another model, through ChatGPT, OpenRouter, Ollama and the like), and it looks through the transcripts for me. It searches them the same way the search box does, reads the parts it needs, and answers with the moments it got them from. Every yellow time in an answer opens the video right there.
 
 ![A chat: a question about the firmament, and an answer about two lectures with a yellow time after each point and the two videos under it](images/chat.png)
 *One question about the whole library, answered from two lectures.*
@@ -25,6 +25,7 @@ Chat is the owner's to turn on, in **Settings** under **Chat**. First it needs a
 
 - **Claude Code:** Claude on the owner's own Claude plan, with no API key. Run `claude setup-token` on any computer that has Claude Code. It opens the browser to sign in, then prints a long-lived token, and that goes in **Token**. Answers count toward the plan's usage, the same as using Claude Code yourself.
 - **Claude:** a key from the Claude Console. Every answer is paid for by that key's account.
+- **ChatGPT:** GPT on the owner's own ChatGPT plan, with no key. **Continue with ChatGPT** opens OpenAI's sign-in in a new tab. Unless that browser is on the computer Tamlil runs on, the tab ends on a page that doesn't load, and that's expected: its address goes in **Address from the ChatGPT tab**, and **Connect** finishes the sign-in. Answers count toward the plan's usage, and **✕** on it signs out at OpenAI too.
 - **OpenRouter:** one key for almost every model there is, Claude, GPT, Gemini, Llama, DeepSeek and the rest, paid for by the OpenRouter account. Its list only shows the models that can use tools, since the chat can't search without them.
 - **OpenAI** and **Gemini:** a key from each.
 - **Ollama:** models on your own computer, with no key. The address starts out as Ollama on the same computer as Tamlil, and can point at another one.
@@ -47,6 +48,6 @@ Then:
 - With Claude Code, every one of Claude Code's own tools is off: no files, no commands and no web. Its settings aren't loaded, and a question goes to it as plain text, so a file name or a slash command in a question is only words.
 - A model that can't use tools can't search, so it says so instead of answering.
 - What goes to the service is the question, the chat's earlier questions and answers, the list of channels, and the transcript lines the model reads.
-- The keys and the token are kept in `chat.json` in the data folder, which only its owner can read. Settings shows just their last four characters.
+- The keys and the token are kept in `chat.json` in the data folder, and ChatGPT's sign-in in `chatgpt.json`, which only their owner can read. Settings shows just their last four characters.
 
 <sub>Next: [Signing in, people and Settings](people.md)</sub>

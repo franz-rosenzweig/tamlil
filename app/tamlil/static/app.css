@@ -291,6 +291,7 @@ details.menu .pop a:hover{background:var(--sunk)}
 .chat:not(.has-thread) .askf{position:static;background:none}
 .connf{grid-template-columns:repeat(auto-fit,minmax(170px,1fr));padding:12px 0 4px}
 .connf select{width:100%}
+.connf .wide{grid-column:1/-1}
 .conns{margin-top:6px}
 .conn{display:flex;align-items:center;gap:8px;padding:10px 0;border-top:1px solid var(--rule)}
 .conn:first-child{border-top:0}

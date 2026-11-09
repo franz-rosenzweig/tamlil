@@ -25,7 +25,7 @@ from pathlib import Path
 
 import anyio
 
-from . import config
+from . import chatgpt, config
 from .db import connect
 from .search import search as word_search, video_hits
 
@@ -33,11 +33,12 @@ log = logging.getLogger("tamlil.chat")
 
 MODELS = {"claude-sonnet-5-5": "Sonnet 5.5", "claude-opus-5-5": "Opus 5.5", "claude-haiku-5-5": "Haiku 5.5"}
 DEFAULT_MODEL = "claude-sonnet-5-5"
-# The services: key is "token" or "key" (needed), "optional", or "" (none). Only Ollama and Other
-# have an address of their own to fill in.
+# The services: key is "token" or "key" (needed), "optional", "" (none), or "signin" (ChatGPT's own
+# sign-in, see chatgpt.py). Only Ollama and Other have an address of their own to fill in.
 PRESETS = {
     "claude_code": {"name": "Claude Code", "base_url": "", "key": "token"},
     "anthropic": {"name": "Claude", "base_url": "", "key": "key"},
+    "chatgpt": {"name": "ChatGPT", "base_url": "", "key": "signin"},
     "openrouter": {"name": "OpenRouter", "base_url": "https://openrouter.ai/api/v1", "key": "key"},
     "openai": {"name": "OpenAI", "base_url": "https://api.openai.com/v1", "key": "key"},
     "gemini": {"name": "Gemini", "base_url": "https://generativelanguage.googleapis.com/v1beta/openai", "key": "key"},
@@ -45,6 +46,7 @@ PRESETS = {
     "custom": {"name": "Other", "base_url": "", "key": "optional"},
 }
 ADDRESS = ("ollama", "custom")
+NO_ADDRESS = ("claude_code", "anthropic", "chatgpt")
 CLAUDE_FALLBACK = ("claude-opus", "claude-sonnet", "claude-fable")    # take the server-side refusal fallback
 # Dollars per million tokens: input, output, cache write (5 minutes), cache read.
 PRICES = {"claude-sonnet-5-5": (2.0, 10.0, 2.5, 0.2), "claude-opus-5-5": (4.0, 20.0, 5.0, 0.2),
@@ -194,7 +196,9 @@ def _usable(d: dict) -> tuple[dict, str] | None:
         return None
     if PRESETS[c["preset"]]["key"] in ("key", "token") and not c["api_key"]:
         return None
-    if c["preset"] not in ("claude_code", "anthropic") and not c["base_url"]:
+    if c["preset"] not in NO_ADDRESS and not c["base_url"]:
+        return None
+    if c["preset"] == "chatgpt" and not chatgpt.load():
         return None
     return c, use[1]
 
@@ -214,7 +218,8 @@ def settings() -> dict:
                         (int(since),)).fetchone()
     return {"on": d["on"], "ready": bool(_usable(d)), "model": d["model"], "model_label": _label(d),
             "everyone": d["everyone"],
-            "connections": [{"id": c["id"], "preset": c["preset"], "name": c["name"], "key": _tail(c["api_key"]),
+            "connections": [{"id": c["id"], "preset": c["preset"], "name": c["name"],
+                             "key": (chatgpt.status() or {}).get("email") or None if c["preset"] == "chatgpt" else _tail(c["api_key"]),
                              "base_url": c["base_url"] if c["preset"] in ADDRESS else ""} for c in d["connections"]],
             "presets": {k: {"name": p["name"], "key": p["key"], "base_url": p["base_url"] if k in ADDRESS else None}
                         for k, p in PRESETS.items()},
@@ -258,7 +263,7 @@ def _fields(c: dict, name, base_url, api_key) -> None:
 
 
 def add_connection(*, preset="", name=None, base_url=None, api_key=None) -> dict:
-    if preset not in PRESETS:
+    if preset not in PRESETS or preset == "chatgpt":           # ChatGPT comes from its sign-in (chatgpt_signed_in)
         raise Refused("preset")
     d = _read()
     p = PRESETS[preset]
@@ -267,12 +272,25 @@ def add_connection(*, preset="", name=None, base_url=None, api_key=None) -> dict
     _fields(c, name, base_url if preset in ADDRESS else None, api_key)
     if p["key"] in ("key", "token") and not c["api_key"]:
         raise Refused("token_" if preset == "claude_code" else "api_key")
-    if not c["base_url"] and preset not in ("claude_code", "anthropic"):
+    if not c["base_url"] and preset not in NO_ADDRESS:
         raise Refused("address")
     d["connections"].append(c)
     if not _split(d["model"]) and preset in ("claude_code", "anthropic"):
         d["model"], d["model_name"] = f"{c['id']}/{DEFAULT_MODEL}", ""
     _write(d)
+    return {**settings(), "added": c["id"]}
+
+
+def chatgpt_signed_in() -> dict:
+    """After the sign-in: the ChatGPT connection, made once."""
+    d = _read()
+    c = next((x for x in d["connections"] if x["preset"] == "chatgpt"), None)
+    if not c:
+        c = {"id": max([x["id"] for x in d["connections"]] + [0]) + 1, "preset": "chatgpt", "name": "ChatGPT",
+             "base_url": "", "api_key": ""}
+        d["connections"].append(c)
+        _write(d)
+    _lists.pop(c["id"], None)
     return {**settings(), "added": c["id"]}
 
 
@@ -339,6 +357,23 @@ async def models(cid: int, fresh: bool = False) -> list[dict]:
     out: list[dict] = []
     if c["preset"] == "claude_code":
         out = [{"id": k, "name": v} for k, v in MODELS.items()]
+    elif c["preset"] == "chatgpt":
+        try:
+            token = await chatgpt.access_token()
+            async with _http(30) as h:
+                r = await h.get(chatgpt.RESOURCE + "/models", headers={"authorization": f"Bearer {token}"})
+        except chatgpt.Failed as e:
+            raise Refused(str(e)) from None
+        except httpx.TransportError:
+            raise Refused("network") from None
+        if r.status_code >= 400:
+            raise Refused("signin" if r.status_code == 401 else _status(r.status_code))
+        obj = r.json()
+        for m in obj.get("models") or []:
+            if m.get("visibility", "list") == "list" and m.get("slug"):
+                out.append({"id": m["slug"], "name": m.get("display_name") or m["slug"]})
+        for m in obj.get("data") or []:
+            out.append({"id": m["id"], "name": m["id"]})
     elif c["preset"] == "anthropic":
         import anthropic
         client = anthropic.AsyncAnthropic(api_key=c["api_key"], max_retries=1)
@@ -367,7 +402,7 @@ async def models(cid: int, fresh: bool = False) -> list[dict]:
                 continue
             if c["preset"] == "openrouter":
                 params = m.get("supported_parameters") or []
-                if "tools" not in params:
+                if "tools" not in params or mid.endswith(":batch"):
                     continue
                 out.append({"id": mid, "name": m.get("name") or mid,
                             "reasoning": m.get("reasoning") or ({} if "reasoning" in params else None)})
@@ -877,6 +912,101 @@ async def _via_chat(conn: dict, model: str, context: str, history: list[tuple[st
         yield ("error", "network")
 
 
+# A ChatGPT plan: OpenAI's Responses API, with the tokens from chatgpt.py. With store off OpenAI keeps
+# nothing, so each round sends everything back: the earlier output whole (its reasoning encrypted) and
+# what the tools said.
+
+RESP_TOOLS = [{"type": "function", "name": t["name"], "description": t["description"],
+               "parameters": t["input_schema"], "strict": False} for t in TOOLS]
+
+
+async def _resp_round(client, headers: dict, body: dict, got: dict):
+    async with client.stream("POST", chatgpt.RESOURCE + "/responses", headers=headers, json=body) as r:
+        if r.status_code >= 400:
+            detail = (await r.aread()).decode(errors="replace")[:800]
+            raise _Failed("plan" if r.status_code == 429 and "usage" in detail else _status(r.status_code), r.status_code, detail)
+        async for line in r.aiter_lines():
+            if not line.startswith("data:"):
+                continue
+            try:
+                obj = json.loads(line[5:].strip())
+            except ValueError:
+                continue
+            kind = obj.get("type", "")
+            if kind == "response.output_text.delta":
+                got["text"] += obj.get("delta") or ""
+                yield obj.get("delta") or ""
+            elif kind == "response.output_item.done" and isinstance(obj.get("item"), dict):
+                got["items"].append(obj["item"])
+            elif kind == "response.completed":
+                if not got["items"]:
+                    got["items"] = list((obj.get("response") or {}).get("output") or [])
+                got["done"] = True
+            elif kind == "response.incomplete":
+                why = ((obj.get("response") or {}).get("incomplete_details") or {}).get("reason") or ""
+                raise _Failed("refused" if why == "content_filter" else "long", 0, why)
+            elif kind in ("response.failed", "error"):
+                err = (obj.get("response") or {}).get("error") or obj.get("error") or obj
+                code = str(err.get("code") or "") if isinstance(err, dict) else ""
+                raise _Failed("plan" if "usage" in code or code.startswith("subscription") else "down", 0, json.dumps(err)[:500])
+
+
+async def _via_chatgpt(conn: dict, model: str, context: str, history: list[tuple[str, str]], question: str):
+    import httpx
+
+    items = [{"role": r, "content": t} for r, t in history] + [{"role": "user", "content": question}]
+    extra = {"reasoning": {"effort": "medium"}, "include": ["reasoning.encrypted_content"]}
+    rnd, force = 0, False
+    try:
+        async with _http() as client:
+            while True:
+                try:
+                    token = await chatgpt.access_token(force=force)
+                except chatgpt.Failed as e:
+                    yield ("error", str(e))
+                    return
+                headers = {"authorization": f"Bearer {token}", "content-type": "application/json"}
+                body = {"model": model, "instructions": SYSTEM + "\n\n" + context, "input": items, "tools": RESP_TOOLS,
+                        "tool_choice": "none" if rnd >= ROUNDS else "auto", "store": False, "stream": True, **extra}
+                got = {"text": "", "items": [], "done": False}
+                try:
+                    async for piece in _resp_round(client, headers, body, got):
+                        yield ("text", piece)
+                except _Failed as e:
+                    if e.status == 401 and not force and not got["text"]:
+                        force = True                 # the token may have just run out: a fresh one, once
+                        continue
+                    if e.status in (400, 422) and extra and not got["text"]:
+                        log.info("chat chatgpt: %s turned something down, asking again plainly: %s", model, e.detail[:300])
+                        extra = {}
+                        continue
+                    log.warning("chat chatgpt %s: %s", e.status, e.detail[:300])
+                    yield ("error", "signin" if e.status == 401 else e.code)
+                    return
+                force = False
+                if not got["done"]:
+                    yield ("error", "down")
+                    return
+                calls = [i for i in got["items"] if i.get("type") == "function_call"]
+                if not calls:
+                    yield ("done", {"text": got["text"], "cost": None})
+                    return
+                items += [{k: v for k, v in i.items() if k != "id"} for i in got["items"]]
+                for c in calls:
+                    try:
+                        args = json.loads(c.get("arguments") or "{}")
+                    except ValueError:
+                        items.append({"type": "function_call_output", "call_id": c.get("call_id"),
+                                      "output": "The tool's input wasn't valid JSON."})
+                        continue
+                    yield ("tool", await asyncio.to_thread(label, c.get("name") or "", args))
+                    out, _err = await asyncio.to_thread(run_tool, c.get("name") or "", args)
+                    items.append({"type": "function_call_output", "call_id": c.get("call_id"), "output": out})
+                rnd += 1
+    except httpx.TransportError:
+        yield ("error", "network")
+
+
 _gate = None
 
 
@@ -1023,7 +1153,7 @@ async def answer(who: str, chat, use: tuple[dict, str], question: str, gone=None
     flag = _running[who] = {"stop": False}
     conn, model = use
     engine = conn["preset"]
-    via = {"claude_code": _via_claude, "anthropic": _via_api}.get(engine, _via_chat)
+    via = {"claude_code": _via_claude, "anthropic": _via_api, "chatgpt": _via_chatgpt}.get(engine, _via_chat)
     gen = via(conn, model, chat["context"], history, question)
     draft, final, cost, failed = "", None, None, None
     try:

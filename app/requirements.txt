@@ -8,3 +8,4 @@ pytest
 anthropic==2.6.0          # chat, with an API key
 claude-agent-sdk==0.2.179 # chat, with a Claude Code token (it brings its own Claude Code)
 httpx==0.28.1             # chat, through OpenRouter, OpenAI, Gemini, Ollama and the like
+pyjwt[crypto]==2.15.1     # checking ChatGPT's sign-in

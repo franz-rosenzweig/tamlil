@@ -302,6 +302,8 @@ async function viewSettings() {
   wireSettings(ppl);
   wireLook();
   if (cset) wireChatSet(cset);
+  const signin = parseHash().params.get('chatgpt');              // back from ChatGPT's sign-in, when it didn't finish
+  if (signin) { history.replaceState(null, '', '#/settings'); toast(chatSay('signin-' + signin)); }
 }
 // The theme is per device (themes.js keeps it), so it's here for everyone, the tailnet too.
 function lookHTML() {
@@ -345,10 +347,19 @@ function chatSetHTML(s) {
 function connFormHTML(s, c, preset) {
   preset = c ? c.preset : preset || 'claude_code';
   const p = s.presets[preset];
+  const signedIn = s.connections.some(x => x.preset === 'chatgpt');
+  const services = `<label>Service<select name="preset">${Object.entries(s.presets).filter(([k]) => k !== 'chatgpt' || !signedIn)
+    .map(([k, x]) => `<option value="${k}" ${k === preset ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>`;
+  if (!c && preset === 'chatgpt') return `<form class="setf connf" id="c-form" data-preset="chatgpt">
+    ${services}
+    <div class="pwbtns" id="c-start"><button class="btn primary" type="button" id="c-gpt">Continue with ChatGPT</button><button class="btn" type="button" id="c-cancel">Cancel</button></div>
+    <label class="wide" id="c-paste" hidden>Address from the ChatGPT tab<input type="url" name="callback" dir="ltr" spellcheck="false" autocomplete="off"></label>
+    <div class="pwbtns" id="c-connect" hidden><button class="btn primary" type="submit">Connect</button><button class="btn" type="button" data-cancel>Cancel</button></div>
+  </form>`;
   return `<form class="setf connf" id="c-form" data-preset="${preset}">
-    ${c ? '' : `<label>Service<select name="preset">${Object.entries(s.presets).map(([k, x]) => `<option value="${k}" ${k === preset ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>`}
+    ${c ? '' : services}
     <label>Name<input type="text" name="name" value="${esc(c ? c.name : p.name)}" maxlength="40"></label>
-    ${p.key ? `<label>${p.key === 'token' ? 'Token' : 'Key'}<input type="password" name="api_key" autocomplete="off" spellcheck="false" dir="ltr" placeholder="${esc(c?.key || '')}" ${!c && (p.key === 'key' || p.key === 'token') ? 'required' : ''}></label>` : ''}
+    ${['key', 'token', 'optional'].includes(p.key) ? `<label>${p.key === 'token' ? 'Token' : 'Key'}<input type="password" name="api_key" autocomplete="off" spellcheck="false" dir="ltr" placeholder="${esc(c?.key || '')}" ${!c && (p.key === 'key' || p.key === 'token') ? 'required' : ''}></label>` : ''}
     ${p.base_url !== null ? `<label>Address<input type="url" name="base_url" value="${esc(c ? c.base_url : p.base_url)}" dir="ltr" spellcheck="false" required></label>` : ''}
     <div class="pwbtns"><button class="btn primary" type="submit">Save</button><button class="btn" type="button" id="c-cancel">Cancel</button></div>
   </form>`;
@@ -383,9 +394,29 @@ function wireConnForm(s, fail) {
   if (!f) return;
   const svc = f.querySelector('[name=preset]');
   if (svc) svc.onchange = () => { f.outerHTML = connFormHTML(s, null, svc.value); wireConnForm(s, fail); $('#c-form [name=preset]').focus(); };
-  $('#c-cancel').onclick = () => { chatForm = null; viewSettings(); };
+  f.querySelectorAll('#c-cancel,[data-cancel]').forEach(b => b.onclick = () => { chatForm = null; viewSettings(); });
+  const gpt = $('#c-gpt');
+  if (gpt) gpt.onclick = async () => {
+    const tab = window.open('about:blank', '_blank');            // opened now, while it's still the click
+    try {
+      const {url} = await api('/api/chat/chatgpt/start', {method: 'POST'});
+      if (tab) { tab.opener = null; tab.location.href = url; } else window.open(url, '_blank', 'noopener');
+      $('#c-start').hidden = true; $('#c-paste').hidden = false; $('#c-connect').hidden = false;
+      f.querySelector('[name=callback]').focus();
+    } catch (err) { if (tab) tab.close(); fail(err); }
+  };
   f.onsubmit = async e => {
     e.preventDefault();
+    if (f.dataset.preset === 'chatgpt' && chatForm === 'new') {
+      try {
+        const r = await api('/api/chat/chatgpt/finish', {method: 'POST', body: JSON.stringify({url: f.querySelector('[name=callback]').value})});
+        chatForm = null;
+        toast('Connected');
+        if (!r.model) chatPick = r.added;
+        await viewSettings();
+      } catch (err) { fail(err); }
+      return;
+    }
     const body = {};
     for (const el of f.elements) if (el.name && (el.name !== 'api_key' || el.value.trim())) body[el.name] = el.value;
     try {
@@ -578,11 +609,12 @@ document.addEventListener('click', async e => {
 /* ---------- chat: questions about the transcripts, answered by Claude ---------- */
 const CHAT_SAY = {off: 'Chat is off', day: "That's all for today", key: "The key didn't work",
   token: "The Claude Code token didn't work", limit: 'Too many requests. Try again in a minute.', model: "That model isn't available",
-  credit: 'The account is out of credit', plan: 'The Claude plan is out of usage', refused: 'No answer to this one',
+  credit: 'The account is out of credit', plan: 'The plan is out of usage', signin: 'Sign in to ChatGPT again', 'signin-scope': 'Plan usage not granted',
+  'signin-start': 'Start again', 'signin-state': 'Start again', 'signin-expired': 'Start again', refused: 'No answer to this one',
   long: 'That took too many steps', down: "Couldn't reach the model", network: "Couldn't reach the model", claude: "Claude Code didn't start",
   request: "The model couldn't take that", tools: "This model can't search", 'too-long': 'That question is too long', missing: 'Not found', video: 'Not found',
   chat: 'Chat is off', preset: 'Choose a service', address: "That address doesn't look right", api_key: "That doesn't look like a key", token_: "That doesn't look like a token"};
-const chatSay = m => CHAT_SAY[m] || m;
+const chatSay = m => CHAT_SAY[m] || (String(m).startsWith('signin-') ? 'Not connected' : m);
 const DOINGS = {search: 'Searching', read: 'Reading', list: 'Listing videos'};
 const CITE = /^#([A-Za-z0-9_-]{1,20})@(\d+(?::\d{1,2}){0,2})$/;
 const tsMs = t => t.split(':').reduce((a, x) => a * 60 + +x, 0) * 1000;

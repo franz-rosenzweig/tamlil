@@ -9,6 +9,10 @@ TMP = DATA / "tmp"
 PROXY = os.environ.get("YTDLP_PROXY") or None
 REQUEST_GAP = float(os.environ.get("REQUEST_GAP", "4"))
 REFRESH_HOURS = float(os.environ.get("REFRESH_HOURS", "6"))
+# gluetun's control server and its API key: with both, the worker moves to another VPN server
+# when YouTube starts turning the current one away. Without them it waits it out.
+GLUETUN_URL = (os.environ.get("GLUETUN_URL") or "").rstrip("/")
+GLUETUN_KEY = os.environ.get("GLUETUN_KEY") or ""
 
 WHISPER_THREADS = int(os.environ.get("WHISPER_THREADS", "8"))
 WHISPER_BEAM = int(os.environ.get("WHISPER_BEAM", "5"))

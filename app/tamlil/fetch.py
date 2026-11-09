@@ -27,6 +27,13 @@ def _opts(**extra) -> dict:
     return o
 
 
+def blocked(err: BaseException) -> bool:
+    """YouTube turning this address away for a while (its bot check, or too many requests),
+    as opposed to something wrong with the video itself."""
+    msg = str(err).lower()
+    return "not a bot" in msg or "http error 429" in msg or "too many requests" in msg
+
+
 def lang_code(code: str | None) -> str | None:
     """YouTube writes Hebrew as 'iw'. Keep the base language only."""
     if not code:

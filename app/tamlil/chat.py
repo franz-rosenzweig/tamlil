@@ -1147,7 +1147,10 @@ async def answer(who: str, chat, use: tuple[dict, str], question: str, gone=None
     history = [(m["role"], m["text"]) for m in db.execute(
         "select role, text from chat_msg where chat_id=? and text!='' order by id", (chat["id"],))]
     now = int(time.time())
-    db.execute("insert into chat_msg(chat_id, role, text, at) values (?,?,?,?)", (chat["id"], "user", question, now))
+    if history and history[-1] == ("user", question):
+        history.pop()                  # asked again after an answer that never came: one question, not two
+    else:
+        db.execute("insert into chat_msg(chat_id, role, text, at) values (?,?,?,?)", (chat["id"], "user", question, now))
     title = chat["title"] or re.sub(r"\s+", " ", question)[:90]
     db.execute("update chat set title=?, updated_at=? where id=?", (title, now, chat["id"]))
     flag = _running[who] = {"stop": False}

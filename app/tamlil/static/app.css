@@ -176,7 +176,7 @@ tr.open td{background:var(--sunk)}
 }
 
 /* people, and who's signed in */
-.me{font-size:13px;white-space:nowrap}
+#me{font-size:13px;white-space:nowrap}
 .ppl td{padding-block:8px}
 .pplf{grid-template-columns:minmax(0,1.6fr) minmax(0,1fr) auto}
 .pplf label:first-child{grid-column:auto}
@@ -258,11 +258,11 @@ details.menu .pop a:hover{background:var(--sunk)}
 .scopev>span:last-child{display:grid;font-weight:600;font-size:15px;line-height:1.35;min-width:0}
 .scopev small,.ref small{font-weight:500;font-size:12.5px;color:var(--muted)}
 .rthumb{display:block;aspect-ratio:16/9;width:100%;border-radius:6px;background:var(--sunk) center/cover no-repeat}
-.thread{flex:1;display:grid;gap:18px;align-content:start;padding-bottom:20px}
+.thread{flex:1;display:grid;grid-template-columns:minmax(0,1fr);gap:18px;align-content:start;padding-bottom:20px}
 .msg p{margin:0 0 .7em}
 .msg p:last-child{margin-bottom:0}
-.msg.me{justify-self:end;max-width:85%;background:var(--surface);border:1px solid var(--rule);border-radius:14px;padding:10px 15px;font-size:15.5px}
-.msg.ai{font-size:16px;line-height:1.65}
+.msg.me{justify-self:end;max-width:85%;overflow-wrap:anywhere;background:var(--surface);border:1px solid var(--rule);border-radius:14px;padding:10px 15px;font-size:15.5px}
+.msg.ai{font-size:16px;line-height:1.65;overflow-wrap:break-word}
 .msg.ai .draft{text-align:start}
 .msg.ai ul,.msg.ai ol{margin:0 0 .7em;padding-inline-start:1.4em}
 .msg.ai li{margin:.2em 0}

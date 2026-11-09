@@ -66,6 +66,8 @@ services:
     environment:
       <<: *app-env
       YTDLP_PROXY: http://gluetun:8888
+      GLUETUN_URL: http://gluetun:8000      # to change VPN server when YouTube blocks one (needs GLUETUN_KEY)
+      GLUETUN_KEY: ${GLUETUN_KEY:-}
       PYTHONPATH: /data/pylib   # daily yt-dlp updates land here, ahead of the image's copy
       HF_HOME: /models
       WHISPER_THREADS: "8"

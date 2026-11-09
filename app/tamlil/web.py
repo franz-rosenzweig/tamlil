@@ -365,7 +365,8 @@ def list_sources():
              sum(video.state='ready') as ready,
              sum(video.state='ready' and video.origin='whisper') as whisper,
              sum(video.state='ready' and video.origin!='whisper') as captions,
-             sum(video.state in ('new','transcribing')) as waiting,
+             sum(video.state in ('new','transcribing')
+                 or (video.state='error' and video.attempts < 3)) as waiting,   -- 3: the worker's MAX_ATTEMPTS
              sum(video.state='error') as errors,
              sum(case when video.state='ready' then video.duration else 0 end) as seconds
            from source left join video on video.source_id = source.id

@@ -2,7 +2,7 @@
 
 # Watching
 
-Clicking a moment opens the video at that line, with its whole transcript under it.
+Clicking a moment, in the search results or in a chat answer, opens the video at that line, with its whole transcript under it, scrolled to that line and marked.
 
 ![A lecture open at 1:04](images/video.png)
 *The player at the moment, a tick for each of the 11 matches, and the transcript.*

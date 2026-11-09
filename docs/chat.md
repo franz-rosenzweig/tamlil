@@ -12,6 +12,7 @@ Search is for when I remember the words. Chat is for when I remember the idea: I
 - **Chat** at the top opens a new chat. Pick **All channels** or one channel, type the question, and **Ask** (or Enter; Shift+Enter starts a new line).
 - **Ask** on a video opens a chat about that one video. Claude gets its whole transcript, so the answers come quickly.
 - While Claude works, the line under the question says what it's doing: **Searching** a word, **Reading** a video, or **Listing videos**. The answer then appears as it's written. **Stop** ends it there, and what it wrote so far is kept.
+- You can look at other screens while it works. The answer keeps being written, and when you come back to the chat it's there, or still on its way. Enter waits until it's done, so a follow-up you type in the meantime goes when you press Enter again.
 - Ask more in the same chat, and Claude keeps the earlier questions and answers in mind.
 - Each time in an answer opens the video at that moment, and the videos it cited are under the answer.
 - It answers in the language you ask in, whatever language the videos are in. It searches Hebrew channels in Hebrew either way.

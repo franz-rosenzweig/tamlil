@@ -442,3 +442,22 @@ def test_chatgpt_sign_in_and_answer(db, monkeypatch):
 
     assert asyncio.run(chatgpt.disconnect()) is True and chatgpt.load() is None
     assert not chat.settings()["ready"]
+
+
+def test_asking_again_after_a_lost_answer(db, monkeypatch):
+    chat.add_connection(preset="anthropic", api_key="sk-ant-api03-" + "x" * 30)
+    chat.set_settings(on=True)
+    seen = []
+
+    async def nothing(conn, model, context, history, question):
+        seen.append(list(history))
+        if len(seen) == 2:
+            yield ("text", "Here it is.")
+
+    monkeypatch.setattr(chat, "_via_api", nothing)
+    c = chat.new_chat(OWNER["email"])
+    run(chat.answer(OWNER["email"], *chat.start(OWNER["email"], c["id"], "Which genres?", True)))   # no answer came
+    run(chat.answer(OWNER["email"], *chat.start(OWNER["email"], c["id"], "Which genres?", True)))   # asked again
+    assert seen[1] == []                                       # not the same question twice in a row
+    msgs = chat.get_chat(OWNER["email"], c["id"])["messages"]
+    assert [(m["role"], m["text"]) for m in msgs] == [("user", "Which genres?"), ("assistant", "Here it is.")]

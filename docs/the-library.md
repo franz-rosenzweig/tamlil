@@ -27,7 +27,9 @@ The worker goes through the source newest first, 10 videos at a time, and gets t
 - On a channel, once it reaches 3 videos in a row older than **From**, it stops, since the rest are older still.
 - Live streams, premieres that haven't happened yet, and private, members-only or removed videos are skipped.
 
-Every 6 hours it looks at each source again for new videos. On a channel that's quick, because it stops as soon as it sees 5 in a row that it already has.
+Every 6 hours it looks at each channel and playlist again for new videos. On a channel that's quick, because it stops as soon as it sees 5 in a row that it already has. A single video is only looked at once.
+
+Now and then YouTube turns the VPN away for a while, asking it to "confirm you're not a bot" or saying it's had too many requests. That's not the videos' fault, so none of them is counted as failed. The worker moves to another VPN server and carries on, and if it only just did that, it leaves YouTube alone for 45 minutes. Meanwhile the top of the page says **Blocked by YouTube until** the time it tries again.
 
 ## The table
 
@@ -40,7 +42,7 @@ Every 6 hours it looks at each source again for new videos. On a channel that's 
 | Searchable | how many are done, how long they are together, and a bar |
 | Whisper | how many of those went through Whisper |
 | Errors | videos that failed |
-| State | **Listing**, **N waiting**, **Done**, **Paused**, or **Error** if listing the source failed |
+| State | **Listing**, **N waiting** (counting the failed ones that will be tried again), **Done**, **Paused**, or **Error** if listing the source failed |
 
 A source's videos open under it, newest first, each with where its text came from (**Captions**, **Auto captions** or **Whisper**), or its state if it isn't done yet. A video that fails is tried again after half an hour and then after an hour. After 3 tries it shows **Error**, the reason, and a **Retry** button.
 
@@ -56,7 +58,7 @@ The buttons on each row:
 
 Pausing a source keeps everything it already has. Its videos stay searchable, and the worker just skips it: no more listing, no new transcripts, and no retries of the ones that failed. If Whisper is partway through one of its videos, it stops within a few seconds, and that video goes back in line. **▶** picks it all up again where it left off.
 
-It's handy for a big channel that's taking over the worker, or when YouTube starts refusing the VPN for a while and every video in a row fails.
+It's handy for a big channel that's taking over the worker.
 
 ## Exporting a source
 

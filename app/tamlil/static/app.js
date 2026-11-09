@@ -183,10 +183,11 @@ async function viewVideo(id, params) {
     $('#tcount').textContent = f ? `${n} / ${segs.length}` : `${segs.length} lines`;
     mark(false);
   }
-  function mark(scroll) {
+  function mark(scroll, behavior = 'smooth') {
     let cur = null;
-    for (const li of $$('.tl')) { const on = +li.dataset.ms <= now; if (on) cur = li; li.classList.remove('now'); }
-    if (cur) { cur.classList.add('now'); if (scroll) cur.scrollIntoView({block: 'center', behavior: 'smooth'}); }
+    const sec = Math.floor(now / 1000);       // a cited 0:50 is the line shown as 0:50, even when it starts at 50.4 s
+    for (const li of $$('.tl')) { const on = Math.floor(li.dataset.ms / 1000) <= sec; if (on) cur = li; li.classList.remove('now'); }
+    if (cur) { cur.classList.add('now'); if (scroll) cur.scrollIntoView({block: 'center', behavior}); }
     $$('.tk').forEach(k => k.classList.toggle('cur', +k.dataset.seek === now));
   }
   let shareBase = '';
@@ -220,6 +221,7 @@ async function viewVideo(id, params) {
   if ($('#prev')) { $('#prev').onclick = () => step(-1); $('#next').onclick = () => step(1); }
   $('#find').addEventListener('input', e => lines(e.target.value));
   lines('');
+  if (t) { window.scrollTo(0, 0); mark(true, 'instant'); }      // opened at a moment (a search hit, a chat answer): show its line
 }
 
 /* ---------- library ---------- */
@@ -618,7 +620,19 @@ const chatSay = m => CHAT_SAY[m] || (String(m).startsWith('signin-') ? 'Not conn
 const DOINGS = {search: 'Searching', read: 'Reading', list: 'Listing videos'};
 const CITE = /^#([A-Za-z0-9_-]{1,20})@(\d+(?::\d{1,2}){0,2})$/;
 const tsMs = t => t.split(':').reduce((a, x) => a * 60 + +x, 0) * 1000;
-const CH = {ctrl: null, chat: null};
+// The answer being written. It lives here, not in the page, so it carries on while you look at other
+// screens, and shows up again (still writing, or finished) when you come back to its chat.
+const CH = {ctrl: null, chat: null, question: '', draft: '', status: '', err: ''};
+const viewing = () => { const {parts} = parseHash(); return parts[0] === 'chat' ? +(parts[1] || 0) : -1; };
+const liveHTML = () => `<div class="msg ai live" id="live"><div class="status">${CH.status || '<span class="dot"></span>'}</div><div class="draft"></div>${CH.err}</div>`;
+function paintLive() {
+  const el = $('#live');
+  if (!el) return;
+  const stick = window.innerHeight + window.scrollY >= document.body.scrollHeight - 120;
+  el.querySelector('.status').innerHTML = CH.status || '<span class="dot"></span>';
+  const out = el.querySelector('.draft'); out.dir = mainDir(CH.draft); out.innerHTML = md(CH.draft, {});
+  if (stick) window.scrollTo(0, document.body.scrollHeight);
+}
 
 function inline(s, refs) {                // s is escaped already
   return s.replace(/`([^`]+)`/g, '<code>$1</code>')
@@ -663,9 +677,10 @@ function refsHTML(refs, text) {
   return `<div class="refs">${[...seen].map(([id, ms]) => { const r = refs[id]; return `<a class="ref" href="#/v/${id}?t=${ms}">
     <span class="rthumb" style="background-image:url('${thumb(id)}')"></span><span dir="${dirOf(r.title)}"><bdi>${esc(r.title)}</bdi><small title="${day(r.upload_date)}">${esc(r.channel || '')}</small></span></a>`; }).join('')}</div>`;
 }
+const aiHTML = (text, refs, tail = '') => `<div class="msg ai"><div class="draft" dir="${mainDir(text)}">${md(text, refs)}</div>${refsHTML(refs, text)}${tail}</div>`;
 const msgHTML = m => m.role === 'user'
   ? `<div class="msg me"><p dir="auto">${esc(m.text).replace(/\n/g, '<br>')}</p></div>`
-  : `<div class="msg ai"><div class="draft" dir="${mainDir(m.text)}">${md(m.text, m.refs || {})}</div>${refsHTML(m.refs || {}, m.text)}</div>`;
+  : aiHTML(m.text, m.refs || {});
 function listHTML(chats, id) {
   return chats.map(x => `<li class="${x.id === id ? 'on' : ''}"><a href="#/chat/${x.id}"><bdi>${esc(x.title)}</bdi><small>${x.video_title
     ? `<bdi>${esc(x.video_title)}</bdi> · ` : x.source_title ? `<bdi>${esc(x.source_title)}</bdi> · ` : ''}${when(x.updated_at)}</small></a><button class="icon" data-delchat="${x.id}" title="Delete" aria-label="Delete">✕</button></li>`).join('');
@@ -698,24 +713,30 @@ async function viewChat(id) {
   const scope = c ? (c.video ? `<a class="scopev" href="#/v/${esc(c.video.id)}"><span class="rthumb" style="background-image:url('${thumb(c.video.id)}')"></span><span dir="${dirOf(c.video.title)}"><bdi>${esc(c.video.title)}</bdi><small><bdi>${esc(c.video.channel || '')}</bdi> · <span dir="ltr">${day(c.video.upload_date)}</span></small></span></a>`
       : c.source ? `<span class="pill q"><bdi>${esc(c.source.title)}</bdi></span>` : '')
     : `<select id="c-src" aria-label="Channel"><option value="">All channels</option>${src.sources.map(x => `<option value="${x.id}">${esc(x.title || x.url)}</option>`).join('')}</select>`;
-  const has = c && c.messages.length;
+  const busy = () => CH.ctrl && CH.chat === id;
+  const msgs = c ? c.messages : [], mine = busy();
+  // A question is saved once its answer starts; until then it's shown from here.
+  const unsaved = mine && !(msgs.length && msgs.at(-1).role === 'user' && msgs.at(-1).text === CH.question);
+  const has = msgs.length || mine;
   $('#main').innerHTML = `<div class="chat${has ? ' has-thread' : ''}">
     <aside class="clist"><a class="btn small primary" href="#/chat">New chat</a><ol id="clist">${listHTML(chats, id)}</ol></aside>
     <section class="cmain">
       <a class="cback" href="#/chat">← Chats</a>
       ${scope ? `<div class="cscope">${scope}</div>` : ''}
-      <div class="thread" id="thread">${c ? c.messages.map(msgHTML).join('') : ''}</div>
-      <form class="askf" id="askf"><textarea id="askq" rows="1" dir="auto" placeholder="Ask" aria-label="Ask" maxlength="4000"></textarea><button class="btn primary" id="askb" type="submit">${CH.ctrl && CH.chat === id ? 'Stop' : 'Ask'}</button></form>
+      <div class="thread" id="thread">${msgs.map(msgHTML).join('')}${unsaved ? msgHTML({role: 'user', text: CH.question}) : ''}${mine ? liveHTML() : ''}</div>
+      <form class="askf" id="askf"><textarea id="askq" rows="1" dir="auto" placeholder="Ask" aria-label="Ask" maxlength="4000"></textarea><button class="btn primary" id="askb" type="submit">${mine ? 'Stop' : 'Ask'}</button></form>
     </section></div>`;
+  if (mine) paintLive();
   const q = $('#askq'), form = $('#askf');
   const grow = () => { q.style.height = 'auto'; q.style.height = Math.min(q.scrollHeight, 240) + 'px'; };
   q.addEventListener('input', grow);
-  q.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); form.requestSubmit(); } });
+  // Enter sends; while an answer is being written it does nothing, so a typed follow-up waits for it.
+  q.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (!busy()) form.requestSubmit(); } });
   if (has) requestAnimationFrame(() => window.scrollTo(0, document.body.scrollHeight));
   if (!matchMedia('(hover: none)').matches || !has) q.focus();
   form.addEventListener('submit', async e => {
     e.preventDefault();
-    if (CH.ctrl && CH.chat === id) { CH.ctrl.abort(); fetch('/api/chats/stop', {method: 'POST'}).catch(() => {}); return; }
+    if (busy()) { CH.ctrl.abort(); fetch('/api/chats/stop', {method: 'POST'}).catch(() => {}); return; }
     const text = q.value.trim();
     if (!text) return;
     if (!id) {
@@ -725,40 +746,42 @@ async function viewChat(id) {
       const sel = $('#c-src'), name = sel.value ? sel.selectedOptions[0].textContent : '';
       sel.parentElement.innerHTML = name ? `<span class="pill q"><bdi>${esc(name)}</bdi></span>` : '';
     }
-    const chatId = id;
+    const chatId = id, ctrl = new AbortController();
+    Object.assign(CH, {ctrl, chat: chatId, question: text, draft: '', status: '', err: ''});
     q.value = ''; grow();
     $('.chat').classList.add('has-thread');
-    $('#thread').insertAdjacentHTML('beforeend', msgHTML({role: 'user', text}) + '<div class="msg ai live"><div class="status"><span class="dot"></span></div><div class="draft"></div></div>');
-    const live = $('#thread').lastElementChild, stat = live.querySelector('.status'), out = live.querySelector('.draft');
-    const bottom = () => window.innerHeight + window.scrollY >= document.body.scrollHeight - 120;
-    let draft = '', raf = 0;
-    const paint = () => { raf = 0; const stick = bottom(); out.dir = mainDir(draft); out.innerHTML = md(draft, {}); if (stick) window.scrollTo(0, document.body.scrollHeight); };
+    $('#thread').insertAdjacentHTML('beforeend', msgHTML({role: 'user', text}) + liveHTML());
     window.scrollTo(0, document.body.scrollHeight);
-    CH.ctrl = new AbortController(); CH.chat = chatId;
     $('#askb').textContent = 'Stop';
-    let ended = false;
+    const current = () => CH.ctrl === ctrl;       // a newer question (in any chat) takes over from this one
+    let raf = 0, final = null;
+    const paint = () => { raf = 0; if (current()) paintLive(); };
+    const fail = code => { CH.err += `<div class="cerr">${esc(chatSay(code))}</div>`; const el = $('#live'); if (el) el.insertAdjacentHTML('beforeend', `<div class="cerr">${esc(chatSay(code))}</div>`); };
     try {
       await streamAsk(chatId, text, (ev, d) => {
-        if (ev === 'text') { draft += d.t; if (!raf) raf = requestAnimationFrame(paint); }
-        else if (ev === 'tool') { draft = ''; paint(); stat.innerHTML = `<span class="dot"></span>${DOINGS[d.what] || ''} ${d.arg ? `<bdi>${esc(d.arg)}</bdi>` : ''}`; }
-        else if (ev === 'reset') { draft = ''; paint(); }
-        else if (ev === 'error') live.insertAdjacentHTML('beforeend', `<div class="cerr">${esc(chatSay(d.code))}</div>`);
-        else if (ev === 'done') {
-          ended = true; cancelAnimationFrame(raf);
-          out.dir = mainDir(d.text); out.innerHTML = md(d.text, d.refs || {}); out.insertAdjacentHTML('afterend', refsHTML(d.refs || {}, d.text));
-        }
-      }, CH.ctrl.signal);
+        if (!current()) return;
+        if (ev === 'start') refreshChats();
+        else if (ev === 'text') { CH.draft += d.t; if (!raf) raf = requestAnimationFrame(paint); }
+        else if (ev === 'tool') { CH.draft = ''; CH.status = `<span class="dot"></span>${DOINGS[d.what] || ''} ${d.arg ? `<bdi>${esc(d.arg)}</bdi>` : ''}`; paintLive(); }
+        else if (ev === 'reset') { CH.draft = ''; paintLive(); }
+        else if (ev === 'error') fail(d.code);
+        else if (ev === 'done') final = d;
+      }, ctrl.signal);
     } catch (err) {
-      if (err.name !== 'AbortError') live.insertAdjacentHTML('beforeend', `<div class="cerr">${esc(chatSay(err.message))}</div>`);
+      if (err.name !== 'AbortError' && current()) fail(err.message);
     } finally {
-      if (!ended && raf) { cancelAnimationFrame(raf); paint(); }
-      stat.remove(); live.classList.remove('live');
-      CH.ctrl = null; CH.chat = null;
-      if ($('#askb') && $('#askf') === form) $('#askb').textContent = 'Ask';
-      api('/api/chats').then(r => { const l = $('#clist'); if (l) l.innerHTML = listHTML(r.chats, +(parseHash().parts[1] || 0)); }).catch(() => {});
+      cancelAnimationFrame(raf);
+      if (current()) {
+        const el = $('#live'), said = final ? final.text : CH.draft.trim();
+        if (el) el.outerHTML = said || CH.err ? aiHTML(said, final ? final.refs || {} : {}, CH.err) : '';
+        Object.assign(CH, {ctrl: null, chat: null, question: '', draft: '', status: '', err: ''});
+        if (viewing() === chatId && $('#askb')) $('#askb').textContent = 'Ask';
+      }
+      refreshChats();
     }
   });
 }
+const refreshChats = () => api('/api/chats').then(r => { const l = $('#clist'); if (l) l.innerHTML = listHTML(r.chats, viewing()); }).catch(() => {});
 document.addEventListener('click', async e => {
   const t = e.target.closest('[data-delchat]');
   if (!t) return;
@@ -781,6 +804,8 @@ async function pollWorker() {
     el.className = 'worker' + (stale ? ' bad' : w.doing && w.doing !== 'idle' ? ' busy' : '');
     if (stale) el.textContent = 'Worker offline';
     else if (!w.doing || w.doing === 'idle') el.textContent = 'Idle';
+    else if (w.doing === 'blocked') { el.className = 'worker bad'; el.textContent = `Blocked by YouTube until ${new Date(w.until * 1000).toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'})}`; }
+    else if (w.doing === 'switching') el.textContent = 'Changing VPN server';
     else {
       const pct = w.doing === 'transcribing' && w.progress != null ? ` ${Math.round(w.progress * 100)}%` : '';
       el.textContent = `${DOING[w.doing] || w.doing}${pct} · `;
@@ -803,7 +828,7 @@ async function route() {
     else if (screen === 'chat') await viewChat(parts[1]);
     else await viewSearch(params);
   } catch (err) { $('#main').innerHTML = `<div class="empty">${esc(err.message)}</div>`; }
-  if (screen !== 'chat') window.scrollTo(0, 0);
+  if (screen !== 'chat' && !(screen === 'v' && params.get('t'))) window.scrollTo(0, 0);   // a moment scrolls to its own line
 }
 document.addEventListener('keydown', e => { if (e.key === '/' && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) { e.preventDefault(); go('/search'); setTimeout(() => $('#q')?.focus(), 50); } });
 window.addEventListener('hashchange', route);

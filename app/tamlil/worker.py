@@ -20,10 +20,67 @@ KNOWN_STOP = 5      # consecutive already-known videos that end an incremental l
 OLDER_STOP = 3      # consecutive videos older than date_from that end a listing
 LIST_BATCH = 10     # new videos per listing pass; their transcripts come before the next pass
 MAX_ATTEMPTS = 3
+BLOCK_WAIT = 45 * 60      # how long to leave YouTube alone after it turns this address away
+SWITCH_GAP = 20 * 60      # at most one VPN server change in this long
 
 
 class Paused(Exception):
     """Its channel was paused partway through Whisper; the video goes back in line."""
+
+
+def _kv(db, key, value=None):
+    if value is None:
+        row = db.execute("select value from kv where key=?", (key,)).fetchone()
+        return row["value"] if row else None
+    db.execute("insert into kv(key, value) values (?, ?) on conflict(key) do update set value=excluded.value",
+               (key, str(value)))
+
+
+def _new_address() -> bool:
+    """Ask gluetun to reconnect, which picks another server, and wait for the new address."""
+    import httpx
+
+    url, head = config.GLUETUN_URL, {"X-API-Key": config.GLUETUN_KEY}
+    try:
+        with httpx.Client(timeout=20, headers=head) as c:
+            before = c.get(f"{url}/v1/publicip/ip").json().get("public_ip")
+            c.put(f"{url}/v1/vpn/status", json={"status": "stopped"}).raise_for_status()
+            time.sleep(3)
+            c.put(f"{url}/v1/vpn/status", json={"status": "running"}).raise_for_status()
+            for _ in range(30):
+                time.sleep(4)
+                try:
+                    now = c.get(f"{url}/v1/publicip/ip").json().get("public_ip")
+                except (httpx.HTTPError, ValueError):
+                    continue
+                if now and now != before:
+                    log.info("new VPN address")
+                    return True
+    except (httpx.HTTPError, ValueError) as e:
+        log.warning("couldn't change the VPN server: %s", e)
+    return False
+
+
+def _blocked(db, err) -> None:
+    """YouTube is turning this address away. Nothing is marked failed: move to another VPN server
+    when that's set up and wasn't just tried, and otherwise leave YouTube alone for a while."""
+    log.warning("YouTube turned us away: %s", _short(err))
+    now = time.time()
+    if config.GLUETUN_URL and config.GLUETUN_KEY and now - float(_kv(db, "vpn_switched") or 0) > SWITCH_GAP:
+        _kv(db, "vpn_switched", now)
+        set_status(db, doing="switching")
+        if _new_address():
+            return
+    _kv(db, "blocked_until", now + BLOCK_WAIT)
+
+
+def held(db) -> bool:
+    """True while the worker is leaving YouTube alone."""
+    until = float(_kv(db, "blocked_until") or 0)
+    if until <= time.time():
+        return False
+    set_status(db, doing="blocked", until=until)
+    return True
 
 
 def _short(err: BaseException) -> str:
@@ -41,7 +98,7 @@ def refresh_due(db) -> bool:
            where not paused and (state='new' or (checked_at is null and state != 'more')
               or (state='more' and not exists (select 1 from video join source s on s.id=video.source_id
                                                where video.state='new' and not s.paused))
-              or (state='ok' and checked_at < datetime('now', ?))
+              or (state='ok' and coalesce(kind, '') != 'video' and checked_at < datetime('now', ?))
               or (state='error' and checked_at < datetime('now', '-1 hour')))
            order by checked_at is not null, checked_at limit 1""",
         (f"-{int(config.REFRESH_HOURS * 60)} minutes",),
@@ -56,6 +113,10 @@ def refresh_due(db) -> bool:
         else:
             db.execute("update source set state='ok', error=null, checked_at=datetime('now') where id=?", (src["id"],))
     except Exception as e:  # noqa: BLE001
+        if fetch.blocked(e):          # not the source's fault: it's listed again once YouTube lets us
+            db.execute("update source set state=? where id=?", (src["state"], src["id"]))
+            _blocked(db, e)
+            return True
         log.warning("listing %s failed: %s", src["url"], e)
         db.execute(
             "update source set state='error', error=?, checked_at=datetime('now') where id=?",
@@ -90,6 +151,8 @@ def _list_source(db, src, continuing=False) -> bool:
         try:
             info = fetch.video_info(e["id"])
         except Exception as err:  # noqa: BLE001
+            if fetch.blocked(err):
+                raise
             msg = _short(err)
             state = "skipped" if any(w in msg.lower() for w in ("private", "members", "unavailable", "removed")) else "error"
             db.execute(
@@ -122,10 +185,13 @@ def _list_source(db, src, continuing=False) -> bool:
     return False
 
 
+PICK = """select video.*, source.lang as source_lang, source.date_from as source_from, source.date_to as source_to
+           from video join source on source.id = video.source_id"""
+
+
 def process_next(db) -> bool:
     v = db.execute(
-        """select video.*, source.lang as source_lang from video join source on source.id = video.source_id
-           where not source.paused and (video.state='new'
+        PICK + """ where not source.paused and (video.state='new'
               or (video.state='error' and video.attempts < ? and video.retry_at < ?))
            order by video.state='error', video.upload_date desc limit 1""",
         (MAX_ATTEMPTS, time.time()),
@@ -139,6 +205,10 @@ def process_next(db) -> bool:
         log.info("paused partway through %s", v["id"])
         db.execute("update video set state='new', updated_at=datetime('now') where id=?", (v["id"],))
     except Exception as e:  # noqa: BLE001
+        if fetch.blocked(e):          # the video's fine: it stays as it was, with no attempt counted
+            db.execute("update video set state=? where id=?", (v["state"], v["id"]))
+            _blocked(db, e)
+            return True
         log.warning("video %s failed: %s\n%s", v["id"], e, traceback.format_exc())
         db.execute(
             "update video set state='error', error=?, attempts=attempts+1, retry_at=?, updated_at=datetime('now')"
@@ -161,9 +231,14 @@ def _process(db, v, work):
             (info["title"], info["channel"], info["upload_date"], info["duration"], info["description"],
              info["language"], json.dumps(tracks), v["id"]),
         )
-        v = db.execute(
-            "select video.*, source.lang as source_lang from video join source on source.id=video.source_id"
-            " where video.id=?", (v["id"],)).fetchone()
+        # Listing couldn't read it the first time, so its date and live status weren't checked then.
+        day, lo, hi = info["upload_date"], _ymd(v["source_from"]), _ymd(v["source_to"])
+        skip = ("skipped" if info["live_status"] in ("is_live", "is_upcoming", "post_live")
+                else "out_of_range" if day and ((lo and day < lo) or (hi and day > hi)) else None)
+        if skip:
+            db.execute("update video set state=?, error=null, updated_at=datetime('now') where id=?", (skip, v["id"]))
+            return
+        v = db.execute(PICK + " where video.id=?", (v["id"],)).fetchone()
     lang = v["source_lang"] if v["source_lang"] in ("he", "en") else v["lang"]
     title = v["title"] or v["id"]
 
@@ -240,6 +315,7 @@ def update_ytdlp(db) -> None:
 
 def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     try:
         os.nice(19)
     except OSError:
@@ -250,6 +326,9 @@ def main():
     db.execute("update source set state='new' where state='listing'")
     log.info("worker up; proxy=%s threads=%s", bool(config.PROXY), config.WHISPER_THREADS)
     while True:
+        if held(db):
+            time.sleep(30)
+            continue
         worked = refresh_due(db) or process_next(db)
         if not worked:
             set_status(db, doing="idle")

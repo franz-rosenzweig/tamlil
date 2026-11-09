@@ -1,14 +1,16 @@
-"""Chat about the transcripts, with Claude.
+"""Chat about the transcripts, with Claude or another model.
 
-The owner picks how Tamlil reaches Claude, in Settings:
+The owner adds connections in Settings and picks one model from one of them:
 
-- an API key: the Anthropic SDK calls Claude, and the key's account pays for it;
-- a Claude Code token (from `claude setup-token`): the Claude Agent SDK runs Claude Code on the owner's
-  own plan, with every one of its built-in tools turned off.
+- Claude Code, with a token from `claude setup-token`: the Claude Agent SDK runs Claude Code on the
+  owner's own plan, with every one of its built-in tools turned off;
+- Claude, with an API key: the Anthropic SDK, and the key's account pays;
+- OpenRouter, OpenAI, Gemini, Ollama or any other service that speaks the OpenAI chat format.
 
-Either way Claude gets the same three tools, which only read the library: search (the same Hebrew-aware
-search as the search box), transcript (a video's lines with their times) and videos (what's in it).
-Each chat is kept, with what its person asked and what Claude answered, and only its person sees it.
+Whichever it is, the model gets the same three tools, which only read the library: search (the same
+Hebrew-aware search as the search box), transcript (a video's lines with their times) and videos (what's
+in it). Each chat is kept, with what its person asked and what was answered, and only its person sees it.
+A model is named "connection id/model", so one setting holds both.
 """
 
 import asyncio
@@ -31,7 +33,19 @@ log = logging.getLogger("tamlil.chat")
 
 MODELS = {"claude-sonnet-5-5": "Sonnet 5.5", "claude-opus-5-5": "Opus 5.5", "claude-haiku-5-5": "Haiku 5.5"}
 DEFAULT_MODEL = "claude-sonnet-5-5"
-ENGINES = ("off", "api", "claude")
+# The services: key is "token" or "key" (needed), "optional", or "" (none). Only Ollama and Other
+# have an address of their own to fill in.
+PRESETS = {
+    "claude_code": {"name": "Claude Code", "base_url": "", "key": "token"},
+    "anthropic": {"name": "Claude", "base_url": "", "key": "key"},
+    "openrouter": {"name": "OpenRouter", "base_url": "https://openrouter.ai/api/v1", "key": "key"},
+    "openai": {"name": "OpenAI", "base_url": "https://api.openai.com/v1", "key": "key"},
+    "gemini": {"name": "Gemini", "base_url": "https://generativelanguage.googleapis.com/v1beta/openai", "key": "key"},
+    "ollama": {"name": "Ollama", "base_url": "http://host.docker.internal:11434/v1", "key": ""},
+    "custom": {"name": "Other", "base_url": "", "key": "optional"},
+}
+ADDRESS = ("ollama", "custom")
+CLAUDE_FALLBACK = ("claude-opus", "claude-sonnet", "claude-fable")    # take the server-side refusal fallback
 # Dollars per million tokens: input, output, cache write (5 minutes), cache read.
 PRICES = {"claude-sonnet-5-5": (2.0, 10.0, 2.5, 0.2), "claude-opus-5-5": (4.0, 20.0, 5.0, 0.2),
           "claude-haiku-5-5": (0.1, 0.5, 0.125, 0.01)}
@@ -133,14 +147,31 @@ def _read() -> dict:
         d = json.loads(_path().read_text())
     except (OSError, ValueError):
         d = {}
-    d.setdefault("engine", "off")
-    d.setdefault("api_key", "")
-    d.setdefault("token", "")
-    d.setdefault("model", DEFAULT_MODEL)
+    if "connections" not in d:          # the first settings: one API key and one token, and an engine
+        conns, model = [], ""
+        old = d.get("model") if d.get("model") in MODELS else DEFAULT_MODEL
+        for preset, secret, engine in (("claude_code", d.get("token"), "claude"), ("anthropic", d.get("api_key"), "api")):
+            if secret:
+                cid = len(conns) + 1
+                conns.append({"id": cid, "preset": preset, "name": PRESETS[preset]["name"], "base_url": "", "api_key": secret})
+                if not model or d.get("engine") == engine:
+                    model = f"{cid}/{old}"
+        d = {"on": d.get("engine") in ("api", "claude"), "connections": conns, "model": model, "everyone": bool(d.get("everyone"))}
+    d.setdefault("on", False)
+    d.setdefault("connections", [])
+    d.setdefault("model", "")
+    d.setdefault("model_name", "")
     d.setdefault("everyone", False)
-    if d["model"] not in MODELS:
-        d["model"] = DEFAULT_MODEL
     return d
+
+
+def _split(ref: str | None) -> tuple[int, str] | None:
+    cid, _, model = (ref or "").partition("/")
+    return (int(cid), model) if cid.isdigit() and model else None
+
+
+def _conn(d: dict, cid: int) -> dict | None:
+    return next((c for c in d["connections"] if c["id"] == cid), None)
 
 
 def _write(d: dict) -> None:
@@ -155,13 +186,25 @@ def _tail(secret: str) -> str | None:
     return "…" + secret[-4:] if secret else None
 
 
-def _usable(d: dict) -> str | None:
-    """The engine that will answer, or None when chat is off or its key is missing."""
-    if d["engine"] == "api" and d["api_key"]:
-        return "api"
-    if d["engine"] == "claude" and d["token"]:
-        return "claude"
-    return None
+def _usable(d: dict) -> tuple[dict, str] | None:
+    """The connection and the model that will answer, or None when chat is off or isn't ready."""
+    use = _split(d["model"])
+    c = use and _conn(d, use[0])
+    if not d["on"] or not c:
+        return None
+    if PRESETS[c["preset"]]["key"] in ("key", "token") and not c["api_key"]:
+        return None
+    if c["preset"] not in ("claude_code", "anthropic") and not c["base_url"]:
+        return None
+    return c, use[1]
+
+
+def _label(d: dict) -> str:
+    use = _split(d["model"])
+    c = use and _conn(d, use[0])
+    if not c:
+        return ""
+    return f"{d['model_name'] or MODELS.get(use[1]) or use[1]} · {c['name']}"
 
 
 def settings() -> dict:
@@ -169,33 +212,88 @@ def settings() -> dict:
     since = time.mktime(time.localtime()[:2] + (1, 0, 0, 0, 0, 0, -1))      # the 1st of this month
     row = _db().execute("select count(*) n, sum(cost) cost from chat_msg where role='assistant' and at>=?",
                         (int(since),)).fetchone()
-    return {"engine": d["engine"], "model": d["model"], "everyone": d["everyone"], "ready": bool(_usable(d)),
-            "api_key": _tail(d["api_key"]), "token": _tail(d["token"]), "models": MODELS,
+    return {"on": d["on"], "ready": bool(_usable(d)), "model": d["model"], "model_label": _label(d),
+            "everyone": d["everyone"],
+            "connections": [{"id": c["id"], "preset": c["preset"], "name": c["name"], "key": _tail(c["api_key"]),
+                             "base_url": c["base_url"] if c["preset"] in ADDRESS else ""} for c in d["connections"]],
+            "presets": {k: {"name": p["name"], "key": p["key"], "base_url": p["base_url"] if k in ADDRESS else None}
+                        for k, p in PRESETS.items()},
             "month": {"answers": row["n"] or 0, "cost": round(row["cost"] or 0, 4)}}
 
 
-_SECRET = re.compile(r"^[A-Za-z0-9_\-]{20,400}$")
+_SECRET = re.compile(r"^[\x21-\x7e]{8,600}$")
+_ADDRESS = re.compile(r"^https?://[^\s/]+\S{0,300}$")
+_MODEL = re.compile(r"^[\w.:@+\-/]{1,200}$")
 
 
-def set_settings(*, engine=None, api_key=None, token=None, model=None, everyone=None) -> dict:
+def set_settings(*, on=None, model=None, model_name=None, everyone=None) -> dict:
     d = _read()
-    if engine is not None:
-        if engine not in ENGINES:
-            raise Refused("engine")
-        d["engine"] = engine
-    for name, value in (("api_key", api_key), ("token", token)):
-        if value is not None:
-            value = value.strip()
-            if value and not _SECRET.match(value):
-                raise Refused(name)
-            d[name] = value
+    if on is not None:
+        d["on"] = bool(on)
     if model is not None:
-        if model not in MODELS:
+        use = _split(model.strip())
+        if not use or not _conn(d, use[0]) or not _MODEL.match(use[1]):
             raise Refused("model")
-        d["model"] = model
+        d["model"], d["model_name"] = f"{use[0]}/{use[1]}", str(model_name or "").strip()[:120]
     if everyone is not None:
         d["everyone"] = bool(everyone)
     _write(d)
+    return settings()
+
+
+def _fields(c: dict, name, base_url, api_key) -> None:
+    p = PRESETS[c["preset"]]
+    if name is not None:
+        c["name"] = re.sub(r"\s+", " ", str(name)).strip()[:40] or p["name"]
+    if base_url is not None and c["preset"] in ADDRESS:
+        base_url = str(base_url).strip().rstrip("/")
+        if not _ADDRESS.match(base_url):
+            raise Refused("address")
+        c["base_url"] = base_url
+    if api_key:                              # an empty key leaves the one there
+        api_key = str(api_key).strip()
+        if not _SECRET.match(api_key):
+            raise Refused("token_" if c["preset"] == "claude_code" else "api_key")
+        c["api_key"] = api_key
+
+
+def add_connection(*, preset="", name=None, base_url=None, api_key=None) -> dict:
+    if preset not in PRESETS:
+        raise Refused("preset")
+    d = _read()
+    p = PRESETS[preset]
+    c = {"id": max([x["id"] for x in d["connections"]] + [0]) + 1, "preset": preset, "name": p["name"],
+         "base_url": p["base_url"], "api_key": ""}
+    _fields(c, name, base_url if preset in ADDRESS else None, api_key)
+    if p["key"] in ("key", "token") and not c["api_key"]:
+        raise Refused("token_" if preset == "claude_code" else "api_key")
+    if not c["base_url"] and preset not in ("claude_code", "anthropic"):
+        raise Refused("address")
+    d["connections"].append(c)
+    if not _split(d["model"]) and preset in ("claude_code", "anthropic"):
+        d["model"], d["model_name"] = f"{c['id']}/{DEFAULT_MODEL}", ""
+    _write(d)
+    return {**settings(), "added": c["id"]}
+
+
+def edit_connection(cid: int, *, name=None, base_url=None, api_key=None) -> dict:
+    d = _read()
+    c = _conn(d, cid)
+    if not c:
+        raise Refused("missing")
+    _fields(c, name, base_url, api_key)
+    _write(d)
+    _lists.pop(cid, None)
+    return settings()
+
+
+def delete_connection(cid: int) -> dict:
+    d = _read()
+    d["connections"] = [c for c in d["connections"] if c["id"] != cid]
+    if (_split(d["model"]) or (0,))[0] == cid:
+        d["model"], d["model_name"] = "", ""
+    _write(d)
+    _lists.pop(cid, None)
     return settings()
 
 
@@ -204,6 +302,80 @@ def allowed(person: dict | None, tailnet: bool) -> bool:
     if not _usable(d):
         return False
     return bool(tailnet or (person and person["owner"]) or (person and d["everyone"]))
+
+
+# ---------- what a connection offers ----------
+
+_transport = None                                # tests swap in an httpx.MockTransport
+_lists: dict[int, tuple[float, list]] = {}       # each connection's models, kept for an hour
+
+
+def _http(timeout: float = 300):
+    import httpx
+    return httpx.AsyncClient(timeout=httpx.Timeout(timeout, connect=20), transport=_transport)
+
+
+def _status(code: int) -> str:
+    return {401: "key", 403: "key", 404: "model", 402: "credit", 429: "limit"}.get(code, "down" if code >= 500 else "request")
+
+
+def _headers(c: dict) -> dict:
+    h = {"authorization": f"Bearer {c['api_key']}"} if c["api_key"] else {}
+    if c["preset"] == "openrouter":
+        h["x-title"] = "Tamlil"
+    return h
+
+
+async def models(cid: int, fresh: bool = False) -> list[dict]:
+    """[{"id", "name"}] for the model list in Settings. OpenRouter's is just the models that can use tools."""
+    import httpx
+
+    hit = _lists.get(cid)
+    if hit and not fresh and time.time() - hit[0] < 3600:
+        return hit[1]
+    c = _conn(_read(), cid)
+    if not c:
+        raise Refused("missing")
+    out: list[dict] = []
+    if c["preset"] == "claude_code":
+        out = [{"id": k, "name": v} for k, v in MODELS.items()]
+    elif c["preset"] == "anthropic":
+        import anthropic
+        client = anthropic.AsyncAnthropic(api_key=c["api_key"], max_retries=1)
+        try:
+            async for m in client.models.list(limit=100):
+                out.append({"id": m.id, "name": m.display_name or m.id})
+        except anthropic.APIConnectionError:
+            raise Refused("network") from None
+        except anthropic.APIStatusError as e:
+            raise Refused(_status(e.status_code)) from None
+    else:
+        try:
+            async with _http(30) as h:
+                r = await h.get(c["base_url"].rstrip("/") + "/models", headers=_headers(c))
+        except httpx.TransportError:
+            raise Refused("network") from None
+        if r.status_code >= 400:
+            raise Refused(_status(r.status_code))
+        try:
+            data = r.json().get("data") or []
+        except ValueError:
+            raise Refused("down") from None
+        for m in data:
+            mid = str(m.get("id") or "").removeprefix("models/")         # Gemini's names start models/
+            if not mid:
+                continue
+            if c["preset"] == "openrouter":
+                params = m.get("supported_parameters") or []
+                if "tools" not in params:
+                    continue
+                out.append({"id": mid, "name": m.get("name") or mid,
+                            "reasoning": m.get("reasoning") or ({} if "reasoning" in params else None)})
+            else:
+                out.append({"id": mid, "name": m.get("name") or mid})
+        out.sort(key=lambda m: m["id"])
+    _lists[cid] = (time.time(), out)
+    return out
 
 
 # ---------- chats ----------
@@ -455,21 +627,29 @@ def label(name: str, args) -> str:
     return "list\t"
 
 
-# ---------- the two ways to reach Claude ----------
+# ---------- the ways to reach a model ----------
+# Each is an async generator of ("text", t), ("tool", label), ("reset", None), ("error", code) and
+# ("done", {"text", "cost"}), given the connection, the model, the chat's context, the earlier
+# questions and answers as plain text, and the question.
 
-def _cost(model: str, usage) -> float:
-    p = PRICES.get(model, PRICES[DEFAULT_MODEL])
+def _cost(model: str, usage) -> float | None:
+    p = PRICES.get(model)
+    if not p:
+        return None
     get = (lambda k: (getattr(usage, k, None) or 0))
     return (get("input_tokens") * p[0] + get("output_tokens") * p[1]
             + get("cache_creation_input_tokens") * p[2] + get("cache_read_input_tokens") * p[3]) / 1e6
 
 
-async def _via_api(cfg: dict, context: str, history: list[tuple[str, str]], question: str):
-    """The Anthropic SDK, with a hand-written tool loop so every word streams to the page."""
+def _add(total: float | None, more: float | None) -> float | None:
+    return total if more is None else (total or 0) + more
+
+
+async def _via_api(conn: dict, model: str, context: str, history: list[tuple[str, str]], question: str):
+    """Claude through the Anthropic SDK, with a hand-written tool loop so every word streams to the page."""
     import anthropic
 
-    model = cfg["model"]
-    client = anthropic.AsyncAnthropic(api_key=cfg["api_key"], max_retries=2)
+    client = anthropic.AsyncAnthropic(api_key=conn["api_key"], max_retries=2)
     messages = []
     for i, (role, text) in enumerate(history + [("user", question)]):
         if i == 0:      # the library (and the video) goes first, and never changes, so it stays cached
@@ -477,8 +657,12 @@ async def _via_api(cfg: dict, context: str, history: list[tuple[str, str]], ques
         else:
             messages.append({"role": role, "content": text})
     tools = [{**t, "eager_input_streaming": True} for t in TOOLS]
-    extra = {} if model == "claude-haiku-5-5" else {"betas": ["server-side-fallback-2026-07-01"], "fallbacks": "default"}
-    cost, rnd, bad = 0.0, 0, 0
+    # Newer models take an effort and the refusal fallback; an older one from the list may not, and is
+    # asked again without them.
+    extra = {"output_config": {"effort": "medium"}}
+    if model.startswith(CLAUDE_FALLBACK):
+        extra.update(betas=["server-side-fallback-2026-07-01"], fallbacks="default")
+    cost, rnd, bad = None, 0, 0
     try:
         while True:
             text = ""
@@ -487,7 +671,6 @@ async def _via_api(cfg: dict, context: str, history: list[tuple[str, str]], ques
                         model=model, max_tokens=16000,
                         system=[{"type": "text", "text": SYSTEM, "cache_control": {"type": "ephemeral"}}],
                         tools=tools, messages=messages, cache_control={"type": "ephemeral"},
-                        output_config={"effort": "medium"},
                         **({"tool_choice": {"type": "none"}} if rnd >= ROUNDS else {}), **extra) as stream:
                     async for ev in stream:
                         if ev.type == "text":
@@ -495,6 +678,12 @@ async def _via_api(cfg: dict, context: str, history: list[tuple[str, str]], ques
                             yield ("text", ev.text)
                     msg = await stream.get_final_message()
                 bad = 0
+            except anthropic.BadRequestError as e:
+                if not extra or text or "credit" in (e.message or "").lower():
+                    raise
+                log.info("chat: %s turned down effort or fallback, asking again without: %s", model, e.message)
+                extra = {}
+                continue
             except ValueError:
                 # A tool input the SDK couldn't parse at all: there's no tool_use id to answer, so ask again.
                 bad += 1
@@ -502,7 +691,7 @@ async def _via_api(cfg: dict, context: str, history: list[tuple[str, str]], ques
                     raise
                 yield ("reset", None)
                 continue
-            cost += _cost(model, msg.usage)
+            cost = _add(cost, _cost(model, msg.usage))
             if msg.stop_reason == "refusal":
                 yield ("error", "refused")
                 return
@@ -537,6 +726,157 @@ async def _via_api(cfg: dict, context: str, history: list[tuple[str, str]], ques
         yield ("error", "network")
 
 
+# The OpenAI chat format: OpenRouter, OpenAI, Gemini, Ollama and the like. Every one of them takes tools,
+# though not every model does (OpenRouter's list only shows the ones that do).
+
+CHAT_TOOLS = [{"type": "function", "function": {
+    "name": t["name"], "description": t["description"],
+    "parameters": {k: v for k, v in t["input_schema"].items() if k != "additionalProperties"}}} for t in TOOLS]
+EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
+
+
+def _nearest(info: dict, want: str = "medium") -> str:
+    """The thinking level to ask an OpenRouter model for: want, or the next one up it takes, or its highest."""
+    takes = [e for e in EFFORTS if e in (info.get("supported_efforts") or [])]
+    if not takes:
+        return want
+    up = [e for e in takes if EFFORTS.index(e) >= EFFORTS.index(want)]
+    return up[0] if up else takes[-1]
+
+
+class _Failed(Exception):
+    def __init__(self, code: str, status: int = 0, detail: str = ""):
+        super().__init__(f"{code} {status} {detail[:200]}")
+        self.code, self.status, self.detail = code, status, detail
+
+
+def _merge(into: dict, piece: dict) -> None:
+    """A piece of a streamed reasoning detail, added to the ones before it (the text runs on)."""
+    for k, v in piece.items():
+        if k in ("text", "summary") and isinstance(v, str) and isinstance(into.get(k), str):
+            into[k] += v
+        elif v not in (None, ""):
+            into[k] = v
+
+
+async def _chat_round(client, url: str, headers: dict, body: dict, got: dict):
+    """One request: yields the answer's words as they come, and fills got with the tool calls, the
+    reasoning to hand back with them, why it stopped and what it cost."""
+    async with client.stream("POST", url, headers=headers, json=body) as r:
+        if r.status_code >= 400:
+            detail = (await r.aread()).decode(errors="replace")[:800]
+            raise _Failed(_status(r.status_code), r.status_code, detail)
+        async for line in r.aiter_lines():
+            if not line.startswith("data:"):
+                continue
+            data = line[5:].strip()
+            if data == "[DONE]":
+                break
+            try:
+                obj = json.loads(data)
+            except ValueError:
+                continue
+            if obj.get("error"):
+                err = json.dumps(obj["error"])
+                raise _Failed("refused" if "moderation" in err.lower() else "down", 0, err)
+            if obj.get("usage"):
+                got["usage"] = obj["usage"]
+            for ch in obj.get("choices") or []:
+                delta = ch.get("delta") or {}
+                if delta.get("content"):
+                    got["text"] += delta["content"]
+                    yield delta["content"]
+                for i, rd in enumerate(delta.get("reasoning_details") or []):
+                    if isinstance(rd, dict):
+                        _merge(got["details"].setdefault(rd.get("index", i), {}), rd)
+                for tc in delta.get("tool_calls") or []:
+                    key = tc.get("index")
+                    if key is None:                 # a whole call at once, with no index
+                        key = f"n{len(got['calls'])}"
+                    c = got["calls"].setdefault(key, {"id": "", "name": "", "args": "", "extra": {}})
+                    c["id"] = tc.get("id") or c["id"]
+                    f = tc.get("function") or {}
+                    c["name"] = c["name"] or f.get("name") or ""
+                    c["args"] += f.get("arguments") or ""
+                    for k, v in tc.items():         # Gemini's thought signature and the like go back as they came
+                        if k not in ("index", "id", "type", "function"):
+                            c["extra"][k] = v
+                if ch.get("finish_reason"):
+                    got["finish"] = ch["finish_reason"]
+
+
+async def _via_chat(conn: dict, model: str, context: str, history: list[tuple[str, str]], question: str):
+    import httpx
+
+    url = conn["base_url"].rstrip("/") + "/chat/completions"
+    headers = {"content-type": "application/json", **_headers(conn)}
+    extra = {"stream_options": {"include_usage": True}}
+    if conn["preset"] == "openrouter":
+        listed = {m["id"]: m for m in (_lists.get(conn["id"]) or (0, []))[1]}
+        info = listed.get(model)
+        if info is None or info.get("reasoning") is not None:
+            extra["reasoning"] = {"effort": _nearest((info or {}).get("reasoning") or {})}
+        extra["usage"] = {"include": True}
+    messages = [{"role": "system", "content": SYSTEM + "\n\n" + context}]
+    messages += [{"role": r, "content": t} for r, t in history] + [{"role": "user", "content": question}]
+    cost, rnd = None, 0
+    try:
+        async with _http() as client:
+            while True:
+                body = {"model": model, "stream": True, "messages": messages, "tools": CHAT_TOOLS, **extra}
+                if rnd >= ROUNDS:
+                    body["tool_choice"] = "none"
+                got = {"text": "", "calls": {}, "details": {}, "finish": None, "usage": None}
+                try:
+                    async for piece in _chat_round(client, url, headers, body, got):
+                        yield ("text", piece)
+                except _Failed as e:
+                    if e.status in (400, 404) and "tool" in e.detail.lower():
+                        log.warning("chat %s %s: %s", conn["preset"], e.status, e.detail[:300])
+                        yield ("error", "tools")
+                        return
+                    if e.status in (400, 422) and extra and not got["text"]:
+                        log.info("chat %s: %s turned something down, asking again plainly: %s", conn["preset"], model, e.detail[:300])
+                        extra = {}
+                        continue
+                    log.warning("chat %s %s: %s", conn["preset"], e.status, e.detail[:300])
+                    yield ("error", e.code)
+                    return
+                usage = got["usage"] or {}
+                if isinstance(usage.get("cost"), (int, float)):
+                    cost = _add(cost, float(usage["cost"]))
+                if got["finish"] == "content_filter":
+                    yield ("error", "refused")
+                    return
+                calls = list(got["calls"].values())
+                if not calls:
+                    yield ("done", {"text": got["text"], "cost": cost})
+                    return
+                if got["finish"] == "length":
+                    yield ("error", "long")
+                    return
+                for i, c in enumerate(calls):
+                    c["id"] = c["id"] or f"call_{rnd}_{i}"
+                said = {"role": "assistant", "content": got["text"] or None, "tool_calls": [
+                    {"id": c["id"], "type": "function", "function": {"name": c["name"], "arguments": c["args"] or "{}"},
+                     **c["extra"]} for c in calls]}
+                if got["details"]:
+                    said["reasoning_details"] = [got["details"][k] for k in sorted(got["details"], key=str)]
+                messages.append(said)
+                for c in calls:
+                    try:
+                        args = json.loads(c["args"] or "{}")
+                    except ValueError:
+                        messages.append({"role": "tool", "tool_call_id": c["id"], "content": "The tool's input wasn't valid JSON."})
+                        continue
+                    yield ("tool", await asyncio.to_thread(label, c["name"], args))
+                    out, _err = await asyncio.to_thread(run_tool, c["name"], args)
+                    messages.append({"role": "tool", "tool_call_id": c["id"], "content": out})
+                rnd += 1
+    except httpx.TransportError:
+        yield ("error", "network")
+
+
 _gate = None
 
 
@@ -547,7 +887,7 @@ def _claude_dirs() -> tuple[Path, Path]:
     return home, work
 
 
-async def _via_claude(cfg: dict, context: str, history: list[tuple[str, str]], question: str):
+async def _via_claude(conn: dict, model: str, context: str, history: list[tuple[str, str]], question: str):
     """Claude Code on the owner's plan, through the Claude Agent SDK. Its own tools are all off; it only
     has ours, served in this process."""
     global _gate
@@ -571,10 +911,10 @@ async def _via_claude(cfg: dict, context: str, history: list[tuple[str, str]], q
     options = ClaudeAgentOptions(
         tools=[], mcp_servers={"tamlil": server}, strict_mcp_config=True,
         allowed_tools=[f"mcp__tamlil__{t['name']}" for t in TOOLS], permission_mode="dontAsk",
-        setting_sources=[], system_prompt={"type": "file", "path": sysfile}, model=cfg["model"], effort="medium",
+        setting_sources=[], system_prompt={"type": "file", "path": sysfile}, model=model, effort="medium",
         max_turns=ROUNDS + 2, include_partial_messages=True, cwd=str(work),
         verbatim_prompts=True,                  # an @path or a /command in a question stays plain text
-        env={"CLAUDE_CODE_OAUTH_TOKEN": cfg["token"], "CLAUDE_CONFIG_DIR": str(home / "config"), "HOME": str(home),
+        env={"CLAUDE_CODE_OAUTH_TOKEN": conn["api_key"], "CLAUDE_CONFIG_DIR": str(home / "config"), "HOME": str(home),
              "DISABLE_AUTOUPDATER": "1", "DISABLE_TELEMETRY": "1", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"},
         stderr=lambda line: stderr.append(line[:300]),
     )
@@ -651,9 +991,8 @@ def start(who: str, chat_id: int, question: str, owner: bool) -> tuple:
     if len(question) > QUESTION:
         raise Refused("too-long")
     c = _chat_row(who, chat_id)
-    cfg = _read()
-    engine = _usable(cfg)
-    if not engine:
+    use = _usable(_read())
+    if not use:
         raise Refused("off")
     stop(who)                          # a new question ends one that was stopped or left behind
     if not owner:
@@ -662,7 +1001,7 @@ def start(who: str, chat_id: int, question: str, owner: bool) -> tuple:
                             (who, int(time.time()) - 86400)).fetchone()[0]
         if day >= PER_DAY:
             raise Refused("day")
-    return c, cfg, engine, question
+    return c, use, question
 
 
 def stop(who: str) -> None:
@@ -670,7 +1009,7 @@ def stop(who: str) -> None:
         _running[who]["stop"] = True
 
 
-async def answer(who: str, chat, cfg: dict, engine: str, question: str, gone=None):
+async def answer(who: str, chat, use: tuple[dict, str], question: str, gone=None):
     """The answer as server-sent events: tool (what it's looking at), text (the answer as it's written),
     reset (throw away the draft), error, and done (the saved answer, with the videos it cites).
     It stops early when stop() is called, or when gone() says the page has gone away."""
@@ -682,7 +1021,10 @@ async def answer(who: str, chat, cfg: dict, engine: str, question: str, gone=Non
     title = chat["title"] or re.sub(r"\s+", " ", question)[:90]
     db.execute("update chat set title=?, updated_at=? where id=?", (title, now, chat["id"]))
     flag = _running[who] = {"stop": False}
-    gen = (_via_api if engine == "api" else _via_claude)(cfg, chat["context"], history, question)
+    conn, model = use
+    engine = conn["preset"]
+    via = {"claude_code": _via_claude, "anthropic": _via_api}.get(engine, _via_chat)
+    gen = via(conn, model, chat["context"], history, question)
     draft, final, cost, failed = "", None, None, None
     try:
         yield _sse("start", {"title": title})
@@ -719,7 +1061,7 @@ async def answer(who: str, chat, cfg: dict, engine: str, question: str, gone=Non
         msg_id = None
         if text:
             cur = db.execute("insert into chat_msg(chat_id, role, text, refs, engine, model, cost, at) values (?,?,?,?,?,?,?,?)",
-                             (chat["id"], "assistant", text, json.dumps(refs, ensure_ascii=False), engine, cfg["model"],
+                             (chat["id"], "assistant", text, json.dumps(refs, ensure_ascii=False), engine, model,
                               cost, int(time.time())))
             msg_id = cur.lastrowid
             db.execute("update chat set updated_at=? where id=?", (int(time.time()), chat["id"]))

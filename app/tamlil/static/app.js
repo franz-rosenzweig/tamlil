@@ -301,7 +301,7 @@ async function viewSettings() {
     </tr>`).join('')}</tbody></table></div></section>` : ''}`;
   wireSettings(ppl);
   wireLook();
-  if (cset) wireChatSet();
+  if (cset) wireChatSet(cset);
 }
 // The theme is per device (themes.js keeps it), so it's here for everyone, the tailnet too.
 function lookHTML() {
@@ -321,37 +321,111 @@ function wireLook() {
     $$('[data-mode]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
   });
 }
+// Chat's settings: on or off, the model, who may use it, and the connections the models come from.
+let chatForm = null;          // the connection form that's open: 'new', or a connection's id
+let chatPick = null;          // the connection whose models are listed, while the list is open
 function chatSetHTML(s) {
   const seg = (key, opts, cur) => `<div class="seg" role="group">${opts.map(([v, l]) => `<button type="button" data-cset="${key}" data-v="${v}" aria-pressed="${cur === v}">${l}</button>`).join('')}</div>`;
-  const keyForm = (key, lbl, have, ph) => `<form class="setf keyf" data-ckey="${key}">
-      <label>${lbl}<input type="password" autocomplete="off" spellcheck="false" placeholder="${esc(have || ph)}" dir="ltr"></label>
-      <button class="btn primary" type="submit">Save</button>${have ? `<button class="linkish dim" type="button" data-cset="${key}" data-v="">Remove</button>` : ''}
-    </form>`;
+  const P = s.presets;
   return `<section class="add set" id="chatset">
-    <div class="lib-head"><h3>Chat</h3>${s.engine !== 'off' && !s.ready ? '<span class="pill warn">No key</span>' : ''}</div>
-    <div class="setrow"><span class="lbl">Answers by</span>${seg('engine', [['off', 'Off'], ['api', 'API key'], ['claude', 'Claude Code']], s.engine)}</div>
-    ${s.engine === 'api' ? keyForm('api_key', 'API key', s.api_key, 'sk-ant-api…') : ''}
-    ${s.engine === 'claude' ? keyForm('token', 'Claude Code token', s.token, 'sk-ant-oat…') : ''}
-    ${s.engine === 'off' ? '' : `<div class="setrow"><span class="lbl">Model</span><select id="c-model">${Object.entries(s.models).map(([k, l]) => `<option value="${k}" ${k === s.model ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div>
-    <div class="setrow"><span class="lbl">Who</span>${seg('everyone', [['0', 'Just me'], ['1', 'Everyone']], s.everyone ? '1' : '0')}</div>`}
+    <div class="lib-head"><h3>Chat</h3>${s.on && !s.ready ? '<span class="pill warn">No model</span>' : ''}</div>
+    <div class="setrow"><span class="lbl">Chat</span>${seg('on', [['0', 'Off'], ['1', 'On']], s.on ? '1' : '0')}</div>
+    <div class="setrow"><span class="lbl">Model</span><button type="button" class="btn small" id="c-pick" ${s.connections.length ? '' : 'disabled'}>${esc(s.model_label || 'Choose')}</button></div>
+    <div id="c-picker" hidden></div>
+    <div class="setrow"><span class="lbl">Who</span>${seg('everyone', [['0', 'Just me'], ['1', 'Everyone']], s.everyone ? '1' : '0')}</div>
     ${s.month.answers ? `<div class="setrow"><span class="lbl">This month</span><span class="mono">${s.month.answers} answers${s.month.cost ? ` · $${s.month.cost.toFixed(2)}` : ''}</span></div>` : ''}
+    <h4>Connections</h4>
+    <div class="conns">${s.connections.map(c => `<div class="conn">
+      <div class="grow"><b>${esc(c.name)}</b><div class="sub mono">${[P[c.preset]?.name !== c.name ? P[c.preset]?.name : '', c.key, c.base_url].filter(Boolean).map(esc).join(' · ')}</div></div>
+      <button type="button" class="btn small" data-cedit="${c.id}">Edit</button><button type="button" class="icon" data-cdel="${c.id}" title="Remove" aria-label="Remove">✕</button>
+    </div>${chatForm === c.id ? connFormHTML(s, c) : ''}`).join('')}</div>
+    ${chatForm === 'new' ? connFormHTML(s, null) : '<div class="setrow"><button type="button" class="btn small" id="c-add">Add</button></div>'}
   </section>`;
 }
-function wireChatSet() {
+function connFormHTML(s, c, preset) {
+  preset = c ? c.preset : preset || 'claude_code';
+  const p = s.presets[preset];
+  return `<form class="setf connf" id="c-form" data-preset="${preset}">
+    ${c ? '' : `<label>Service<select name="preset">${Object.entries(s.presets).map(([k, x]) => `<option value="${k}" ${k === preset ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>`}
+    <label>Name<input type="text" name="name" value="${esc(c ? c.name : p.name)}" maxlength="40"></label>
+    ${p.key ? `<label>${p.key === 'token' ? 'Token' : 'Key'}<input type="password" name="api_key" autocomplete="off" spellcheck="false" dir="ltr" placeholder="${esc(c?.key || '')}" ${!c && (p.key === 'key' || p.key === 'token') ? 'required' : ''}></label>` : ''}
+    ${p.base_url !== null ? `<label>Address<input type="url" name="base_url" value="${esc(c ? c.base_url : p.base_url)}" dir="ltr" spellcheck="false" required></label>` : ''}
+    <div class="pwbtns"><button class="btn primary" type="submit">Save</button><button class="btn" type="button" id="c-cancel">Cancel</button></div>
+  </form>`;
+}
+function wireChatSet(s) {
+  const fail = err => { toast(chatSay(err.message === 'token' ? 'token_' : err.message)); return null; };
   const save = async body => {
-    try { await api('/api/chat/settings', {method: 'POST', body: JSON.stringify(body)}); await viewSettings(); return true; }
-    catch (err) { toast(chatSay(err.message === 'token' ? 'token_' : err.message)); return false; }
+    try { const r = await api('/api/chat/settings', {method: 'POST', body: JSON.stringify(body)}); await viewSettings(); return r; }
+    catch (err) { return fail(err); }
   };
   $$('[data-cset]').forEach(b => b.onclick = () => {
-    const k = b.dataset.cset, v = b.dataset.v;
-    save({[k]: k === 'everyone' ? v === '1' : v}).then(ok => ok && k !== 'engine' && toast(k === 'everyone' ? 'Saved' : 'Removed'));
+    const k = b.dataset.cset, v = b.dataset.v === '1';
+    save({[k]: v}).then(r => r && k === 'everyone' && toast('Saved'));
   });
-  $$('[data-ckey]').forEach(f => f.onsubmit = async e => {
+  const add = $('#c-add'); if (add) add.onclick = () => { chatForm = 'new'; viewSettings(); };
+  $$('[data-cedit]').forEach(b => b.onclick = () => { chatForm = +b.dataset.cedit; viewSettings(); });
+  $$('[data-cdel]').forEach(b => b.onclick = async () => {
+    if (!b.dataset.armed) {
+      b.dataset.armed = '1'; b.textContent = 'Remove?'; b.classList.add('pill', 'bad');
+      setTimeout(() => { if (b.isConnected) { delete b.dataset.armed; b.textContent = '✕'; b.classList.remove('pill', 'bad'); } }, 4000);
+      return;
+    }
+    await api(`/api/chat/connections/${b.dataset.cdel}`, {method: 'DELETE'}); toast('Removed'); viewSettings();
+  });
+  wireConnForm(s, fail);
+  $('#c-pick').onclick = () => { chatPick = chatPick ? null : (+String(s.model).split('/')[0] || s.connections[0].id); viewSettings(); };
+  if (chatPick && s.connections.some(c => c.id === chatPick)) openPicker(s, chatPick, save);
+  else chatPick = null;
+}
+function wireConnForm(s, fail) {
+  const f = $('#c-form');
+  if (!f) return;
+  const svc = f.querySelector('[name=preset]');
+  if (svc) svc.onchange = () => { f.outerHTML = connFormHTML(s, null, svc.value); wireConnForm(s, fail); $('#c-form [name=preset]').focus(); };
+  $('#c-cancel').onclick = () => { chatForm = null; viewSettings(); };
+  f.onsubmit = async e => {
     e.preventDefault();
-    const v = f.querySelector('input').value.trim();
-    if (v && await save({[f.dataset.ckey]: v})) toast('Saved');
-  });
-  const m = $('#c-model'); if (m) m.onchange = () => save({model: m.value}).then(ok => ok && toast('Saved'));
+    const body = {};
+    for (const el of f.elements) if (el.name && (el.name !== 'api_key' || el.value.trim())) body[el.name] = el.value;
+    try {
+      const r = chatForm === 'new'
+        ? await api('/api/chat/connections', {method: 'POST', body: JSON.stringify(body)})
+        : await api(`/api/chat/connections/${chatForm}`, {method: 'PATCH', body: JSON.stringify(body)});
+      chatForm = null;
+      toast('Saved');
+      if (r.added && !r.model) chatPick = r.added;          // nothing chosen yet: choose from this one's models
+      await viewSettings();
+    } catch (err) { fail(err); }
+  };
+}
+async function openPicker(s, cid, save) {
+  const box = $('#c-picker');
+  const cur = String(s.model);
+  box.hidden = false;
+  box.innerHTML = `<div class="cpick">
+    ${s.connections.length > 1 ? `<select id="cp-conn" aria-label="Connection">${s.connections.map(c => `<option value="${c.id}" ${c.id === cid ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>` : ''}
+    <div class="cprow"><input type="search" id="cp-q" placeholder="Model" dir="ltr" spellcheck="false" autocomplete="off"><button type="button" class="btn small" id="cp-use">Use</button></div>
+    <div class="cplist" id="cp-list"><div class="muted cpnote">…</div></div>
+  </div>`;
+  const q = $('#cp-q'), list = $('#cp-list');
+  const pick = (id, name) => { chatPick = null; save({model: `${cid}/${id}`, model_name: name || ''}).then(r => r && toast('Saved')); };
+  const conn = $('#cp-conn'); if (conn) conn.onchange = () => { chatPick = +conn.value; openPicker(s, chatPick, save); };
+  $('#cp-use').onclick = () => q.value.trim() && pick(q.value.trim());
+  q.onkeydown = e => { if (e.key === 'Enter' && q.value.trim()) { e.preventDefault(); pick(q.value.trim()); } };
+  q.focus();
+  let all;
+  try { all = (await api(`/api/chat/connections/${cid}/models`)).models; }
+  catch (err) { list.innerHTML = `<div class="cerr cpnote">${esc(chatSay(err.message))}</div>`; return; }
+  const draw = () => {
+    const w = q.value.trim().toLowerCase();
+    const hits = all.filter(m => !w || m.id.toLowerCase().includes(w) || (m.name || '').toLowerCase().includes(w)).slice(0, 200);
+    list.innerHTML = hits.map(m => `<button type="button" data-mid="${esc(m.id)}" data-mname="${esc(m.name || '')}" class="${`${cid}/${m.id}` === cur ? 'on' : ''}">
+      <span>${esc(m.name || m.id)}</span>${m.name && m.name !== m.id ? `<span class="id">${esc(m.id)}</span>` : ''}</button>`).join('') || '<div class="muted cpnote">—</div>';
+    list.querySelectorAll('[data-mid]').forEach(b => b.onclick = () => pick(b.dataset.mid, b.dataset.mname));
+  };
+  q.oninput = draw;
+  draw();
 }
 function accountHTML() {
   return `<section class="add set">
@@ -502,12 +576,12 @@ document.addEventListener('click', async e => {
 });
 
 /* ---------- chat: questions about the transcripts, answered by Claude ---------- */
-const CHAT_SAY = {off: 'Chat is off', day: "That's all for today", key: "The API key didn't work",
-  token: "The Claude Code token didn't work", limit: 'Claude is busy. Try again in a minute.', model: "That model isn't available",
-  credit: 'The API account is out of credit', plan: 'The Claude plan is out of usage', refused: "Claude didn't answer this one",
-  long: 'That took too many steps', down: "Couldn't reach Claude", network: "Couldn't reach Claude", claude: "Claude Code didn't start",
-  request: "Claude couldn't take that", 'too-long': 'That question is too long', missing: 'Not found', video: 'Not found',
-  chat: 'Chat is off', engine: 'Choose one', api_key: "That doesn't look like an API key", token_: "That doesn't look like a token"};
+const CHAT_SAY = {off: 'Chat is off', day: "That's all for today", key: "The key didn't work",
+  token: "The Claude Code token didn't work", limit: 'Too many requests. Try again in a minute.', model: "That model isn't available",
+  credit: 'The account is out of credit', plan: 'The Claude plan is out of usage', refused: 'No answer to this one',
+  long: 'That took too many steps', down: "Couldn't reach the model", network: "Couldn't reach the model", claude: "Claude Code didn't start",
+  request: "The model couldn't take that", tools: "This model can't search", 'too-long': 'That question is too long', missing: 'Not found', video: 'Not found',
+  chat: 'Chat is off', preset: 'Choose a service', address: "That address doesn't look right", api_key: "That doesn't look like a key", token_: "That doesn't look like a token"};
 const chatSay = m => CHAT_SAY[m] || m;
 const DOINGS = {search: 'Searching', read: 'Reading', list: 'Listing videos'};
 const CITE = /^#([A-Za-z0-9_-]{1,20})@(\d+(?::\d{1,2}){0,2})$/;

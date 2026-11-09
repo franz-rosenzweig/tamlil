@@ -43,6 +43,8 @@ services:
     build: ./app
     container_name: tamlil-web
     mem_limit: 2g    # room for a chat answer or two from Claude Code
+    extra_hosts:
+      - "host.docker.internal:host-gateway"    # Ollama on this computer, for the chat
 
   # The one front door: Tamlil and its player on the same address (:8445).
   gateway:

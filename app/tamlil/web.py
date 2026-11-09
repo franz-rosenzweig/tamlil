@@ -560,8 +560,8 @@ def api_chat_delete(chat_id: int, request: Request):
 @app.post("/api/chats/{chat_id}/ask")
 def api_chat_ask(chat_id: int, body: Question, request: Request):
     who, owner = _chatter(request)
-    c, cfg, engine, q = _chat_do(chat.start, who, chat_id, body.text, owner)
-    return StreamingResponse(chat.answer(who, c, cfg, engine, q, gone=request.is_disconnected),
+    c, use, q = _chat_do(chat.start, who, chat_id, body.text, owner)
+    return StreamingResponse(chat.answer(who, c, use, q, gone=request.is_disconnected),
                              media_type="text/event-stream", headers={"cache-control": "no-cache", "x-accel-buffering": "no"})
 
 
@@ -572,11 +572,17 @@ def api_chat_stop(request: Request):
 
 
 class ChatSettings(BaseModel):
-    engine: str | None = None
-    api_key: str | None = None
-    token: str | None = None
+    on: bool | None = None
     model: str | None = None
+    model_name: str | None = None
     everyone: bool | None = None
+
+
+class Connection(BaseModel):
+    preset: str | None = None
+    name: str | None = None
+    base_url: str | None = None
+    api_key: str | None = None
 
 
 @app.get("/api/chat/settings")
@@ -589,6 +595,33 @@ def api_chat_settings(request: Request):
 def api_chat_settings_save(body: ChatSettings, request: Request):
     _owner_only(request)
     return _chat_do(chat.set_settings, **body.model_dump(exclude_none=True))
+
+
+@app.post("/api/chat/connections")
+def api_chat_connection_add(body: Connection, request: Request):
+    _owner_only(request)
+    return _chat_do(chat.add_connection, **body.model_dump(exclude_none=True))
+
+
+@app.patch("/api/chat/connections/{cid}")
+def api_chat_connection_edit(cid: int, body: Connection, request: Request):
+    _owner_only(request)
+    return _chat_do(chat.edit_connection, cid, **body.model_dump(exclude_none=True, exclude={"preset"}))
+
+
+@app.delete("/api/chat/connections/{cid}")
+def api_chat_connection_delete(cid: int, request: Request):
+    _owner_only(request)
+    return chat.delete_connection(cid)
+
+
+@app.get("/api/chat/connections/{cid}/models")
+async def api_chat_connection_models(cid: int, request: Request, fresh: int = 0):
+    _owner_only(request)
+    try:
+        return {"models": await chat.models(cid, fresh=bool(fresh))}
+    except chat.Refused as e:
+        raise HTTPException(CHAT_STATUS.get(str(e), 502), str(e)) from None
 
 
 app.mount("/static", StaticFiles(directory=STATIC), name="static")

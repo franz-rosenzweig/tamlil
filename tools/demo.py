@@ -242,7 +242,10 @@ def build(data: Path):
     db.execute("insert into share(token, video_id, made_by, made_at) values ('demo-share-link', ?, 'dana', ?)",
                (VIDEOS[0][1], now - 86400))
     from tamlil import chat
-    chat.set_settings(engine="claude", token="sk-ant-oat01-demo-" + "0" * 30, everyone=True)
+    chat.add_connection(preset="claude_code", api_key="sk-ant-oat01-demo-" + "0" * 30)
+    chat.add_connection(preset="openrouter", api_key="sk-or-v1-demo-" + "0" * 40)
+    chat.add_connection(preset="ollama", name="Ollama on the desktop", base_url="http://192.168.1.20:11434/v1")
+    chat.set_settings(on=True, everyone=True)
     for i, (video_id, turns) in enumerate(CHATS):
         c = chat.new_chat(PEOPLE[0][0], video_id=video_id)
         at = now - 3600 * (len(CHATS) - i)

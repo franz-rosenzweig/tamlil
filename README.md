@@ -35,7 +35,7 @@ So Tamlil (תמליל, Hebrew for a transcript) keeps an eye on the few channels
 - **Search that knows Hebrew:** it finds שמים in השמים and ושמים, in שמיים, and with or without niqqud, and tells you which kind of match each one is. A channel, words in the title and dates narrow it down, sorted by best match, newest, oldest or most moments. See [Searching](docs/searching.md).
 - **Opens at the moment:** a private player starts at the line, with the whole transcript under it, a tick on the timeline for every match, and ← → to step through them. See [Watching](docs/watching.md).
 - **Its own VPN:** everything that talks to YouTube goes through the stack's own gluetun, so it never uses the server's own address.
-- **Ask Claude:** a chat about the videos. Claude searches and reads the transcripts and answers with the moments it got it from, through an API key or the owner's own Claude plan with Claude Code. See [Chat](docs/chat.md).
+- **Ask Claude, or another model:** a chat about the videos. The model searches and reads the transcripts and answers with the moments it got it from. It can be Claude on the owner's own plan through Claude Code, or a model through a Claude key, OpenRouter, OpenAI, Gemini, Ollama or anything else that speaks the OpenAI chat format. See [Chat](docs/chat.md).
 - **Share and export:** a link to a transcript that anyone can open, and every transcript as text, subtitles (`.srt`, `.vtt`) or JSON, one video or a whole channel. See [Watching](docs/watching.md#sharing-and-exporting).
 - **Pause a channel:** it keeps everything it has and the worker skips it, until it's picked up again.
 - **Invite only:** I invite people by email, or they ask for an invite and I say yes. They sign in with a code by email or a password, and Settings has their account. See [Signing in, people and Settings](docs/people.md).
@@ -71,7 +71,7 @@ Whisper runs on the CPU, so it's slow: about 25 minutes for an hour of Hebrew on
 
 ## How it's built
 
-- `app/tamlil/`: the app, in Python. `web.py` is the page's server (FastAPI), `worker.py` lists the channels and gets the transcripts, `fetch.py` talks to YouTube through yt-dlp, `transcribe.py` runs faster-whisper, `hebrew.py` is the Hebrew matching, `search.py` searches SQLite's full-text index, `links.py` turns YouTube, Invidious and Materialious links into YouTube's own, `export.py` writes the transcripts out, `chat.py` is the chat with Claude, and `accounts.py`, `emails.py` and `mail.py` are the accounts, the invites and the emails.
+- `app/tamlil/`: the app, in Python. `web.py` is the page's server (FastAPI), `worker.py` lists the channels and gets the transcripts, `fetch.py` talks to YouTube through yt-dlp, `transcribe.py` runs faster-whisper, `hebrew.py` is the Hebrew matching, `search.py` searches SQLite's full-text index, `links.py` turns YouTube, Invidious and Materialious links into YouTube's own, `export.py` writes the transcripts out, `chat.py` is the chat, with Claude or another model, and `accounts.py`, `emails.py` and `mail.py` are the accounts, the invites and the emails.
 - `app/tamlil/static/`: the page, in plain HTML, CSS and JavaScript.
 - `gateway/`: Caddy in front of everything, so the app and its player share one address and one sign-in.
 - `invidious/`: the player's database setup, from Invidious.

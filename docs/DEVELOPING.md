@@ -9,7 +9,7 @@
 | Service | What it does |
 |---|---|
 | gateway | Caddy on 127.0.0.1:8445, the one way in for the app and its player. Outside the tailnet it asks the app about the sign-in first. |
-| web | the app's page and API (FastAPI), on the stack's own network only, and the chat (up to 2 GB, for Claude Code) |
+| web | the app's page and API (FastAPI), on the stack's own network only, and the chat (up to 2 GB, for Claude Code; `host.docker.internal` reaches an Ollama on the same computer) |
 | worker | lists the sources and gets the transcripts, at the lowest priority, with at most 8 CPUs and 6 GB |
 | gluetun | the VPN, with an HTTP proxy that the worker and Invidious go through |
 | invidious, companion, invidious-db | the private player |
@@ -64,7 +64,7 @@ The first address on the list is the owner's. `list` shows the requests waiting 
 Everything is in `DATA_DIR`:
 
 - `tamlil.db`: the sources, videos, transcripts, the index, the shared links and the chats (SQLite).
-- `accounts.json`: the people (with scrypt hashes for anyone who set a password), the requests, the two settings for requests, and the cookie secret. It, `mail.json` and `chat.json` (how chat reaches Claude, with its API key or Claude Code token) are all mode 600.
+- `accounts.json`: the people (with scrypt hashes for anyone who set a password), the requests, the two settings for requests, and the cookie secret. It, `mail.json` and `chat.json` (the chat's connections, with their keys and the Claude Code token) are all mode 600.
 - `tmp/` for audio while it's transcribed, `cache/` for yt-dlp, and `pylib/` for the daily yt-dlp.
 
 After changing the Hebrew rules in `hebrew.py`, rebuild the index from the saved transcripts:
@@ -79,7 +79,7 @@ docker exec tamlil-web python -m tamlil.reindex
 docker compose build web && docker run --rm -e TAMLIL_DATA=/tmp tamlil:latest python -m pytest -q tests
 ```
 
-They cover the Hebrew matching, the caption parser, the index, the search filters and sorting, the links from YouTube, Invidious and Materialious, the accounts, codes and passwords, asking for an invite, the emails, export, listing in batches, and the chat (its tools, its settings, and an answer with tool calls, against a stand-in for Claude).
+They cover the Hebrew matching, the caption parser, the index, the search filters and sorting, the links from YouTube, Invidious and Materialious, the accounts, codes and passwords, asking for an invite, the emails, export, listing in batches, and the chat (its tools, its settings and connections, the model lists, and answers with tool calls through a Claude key and through OpenRouter, against stand-ins for both).
 
 ## The demo
 

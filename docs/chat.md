@@ -2,7 +2,7 @@
 
 # Chat
 
-Search is for when I remember the words. Chat is for when I remember the idea: I ask Claude a question about the videos, and it looks through the transcripts for me. It searches them the same way the search box does, reads the parts it needs, and answers with the moments it got them from. Every yellow time in an answer opens the video right there.
+Search is for when I remember the words. Chat is for when I remember the idea: I ask Claude a question about the videos (or another model, through OpenRouter, Ollama and the like), and it looks through the transcripts for me. It searches them the same way the search box does, reads the parts it needs, and answers with the moments it got them from. Every yellow time in an answer opens the video right there.
 
 ![A chat: a question about the firmament, and an answer about two lectures with a yellow time after each point and the two videos under it](images/chat.png)
 *One question about the whole library, answered from two lectures.*
@@ -21,20 +21,32 @@ The transcripts come from captions or from Whisper, so they have mistakes, most 
 
 ## Turning it on
 
-Chat is the owner's to turn on, in **Settings** under **Chat**:
+Chat is the owner's to turn on, in **Settings** under **Chat**. First it needs a connection, which is where the answers come from. **Add** one under **Connections**:
 
-- **Answers by:**
-  - **Off.**
-  - **API key:** a key from the Claude Console. Every answer is paid for by that key's account, and **This month** in Settings counts the answers and adds up roughly what they cost.
-  - **Claude Code:** Claude on the owner's own Claude plan, through Claude Code, with no API key. Run `claude setup-token` on any computer that has Claude Code. It opens the browser to sign in, then prints a long-lived token, and that goes in **Claude Code token**. Answers count toward the plan's usage, the same as using Claude Code yourself.
-- **Model:** Sonnet 5.5 to start with. Opus 5.5 is slower and more careful, and Haiku 5.5 is the quickest and the cheapest.
+- **Claude Code:** Claude on the owner's own Claude plan, with no API key. Run `claude setup-token` on any computer that has Claude Code. It opens the browser to sign in, then prints a long-lived token, and that goes in **Token**. Answers count toward the plan's usage, the same as using Claude Code yourself.
+- **Claude:** a key from the Claude Console. Every answer is paid for by that key's account.
+- **OpenRouter:** one key for almost every model there is, Claude, GPT, Gemini, Llama, DeepSeek and the rest, paid for by the OpenRouter account. Its list only shows the models that can use tools, since the chat can't search without them.
+- **OpenAI** and **Gemini:** a key from each.
+- **Ollama:** models on your own computer, with no key. The address starts out as Ollama on the same computer as Tamlil, and can point at another one.
+- **Other:** anything else that speaks the OpenAI chat format, like LM Studio or vLLM, with its address and a key if it needs one.
+
+Then:
+
+- **Model:** pick a connection, and then a model from its list, or type a model's name and **Use** it. Claude Code and Claude start out on Sonnet 5.5. Opus 5.5 is slower and more careful, and Haiku 5.5 is the quickest and the cheapest.
+- **Chat:** **On** or **Off**.
 - **Who:** **Just me** (the owner, and anyone on the tailnet) or **Everyone** on the list. Everyone but the owner gets 60 questions a day.
+- **This month** counts the answers, and adds up what they cost where the service says (a Claude key and OpenRouter do).
 
-## What Claude can and can't do
+![Chat in Settings: On, Sonnet 5.5 through Claude Code with its list open, Everyone, and three connections: Claude Code, OpenRouter and an Ollama](images/chat-settings.png)
+
+**Edit** changes a connection's name, key or address (a key left empty stays as it was), and **✕** removes it, after asking once more.
+
+## What the model can and can't do
 
 - It has three tools, and all three only read: **search** (the search box's own search, with the same filters), **transcript** (a video's lines with their times) and **videos** (what's in the Library). It can't change the Library, see the people, or reach anything else.
 - With Claude Code, every one of Claude Code's own tools is off: no files, no commands and no web. Its settings aren't loaded, and a question goes to it as plain text, so a file name or a slash command in a question is only words.
-- What goes to Anthropic is the question, the chat's earlier questions and answers, the list of channels, and the transcript lines Claude reads.
-- The key and the token are kept in `chat.json` in the data folder, which only its owner can read. Settings shows just their last four characters.
+- A model that can't use tools can't search, so it says so instead of answering.
+- What goes to the service is the question, the chat's earlier questions and answers, the list of channels, and the transcript lines the model reads.
+- The keys and the token are kept in `chat.json` in the data folder, which only its owner can read. Settings shows just their last four characters.
 
 <sub>Next: [Signing in, people and Settings](people.md)</sub>

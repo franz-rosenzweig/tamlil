@@ -1,6 +1,7 @@
 import asyncio
 import json
 import threading
+import time
 from types import SimpleNamespace as NS
 
 import anthropic
@@ -17,6 +18,7 @@ GUEST = {"email": "dana@example.com", "owner": False}
 def fresh(monkeypatch):
     monkeypatch.setattr(chat, "_local", threading.local())      # a new connection for each test's database
     chat._running.clear()
+    chat._lists.clear()
 
 
 def events(raw: str) -> list[tuple[str, dict]]:
@@ -61,23 +63,57 @@ def test_tools(db, monkeypatch):
 
 
 def test_settings(db):
-    assert chat.settings()["engine"] == "off" and not chat.allowed(OWNER, False)
-    chat.set_settings(engine="api")
-    assert not chat.settings()["ready"] and not chat.allowed(OWNER, False)      # no key yet
+    assert chat.settings()["on"] is False and not chat.allowed(OWNER, False)
     with pytest.raises(chat.Refused):
-        chat.set_settings(api_key="not a key")
+        chat.add_connection(preset="openrouter")                               # it needs a key
     with pytest.raises(chat.Refused):
-        chat.set_settings(model="gpt")
-    s = chat.set_settings(api_key=" sk-ant-api03-" + "x" * 30 + "WXYZ ")
-    assert s["ready"] and s["api_key"] == "…WXYZ" and "sk-ant" not in json.dumps(s)
+        chat.add_connection(preset="anthropic", api_key="not a key")
+    with pytest.raises(chat.Refused):
+        chat.add_connection(preset="custom", base_url="ftp://x")
+    with pytest.raises(chat.Refused):
+        chat.add_connection(preset="nope")
+    s = chat.add_connection(preset="anthropic", api_key=" sk-ant-api03-" + "x" * 30 + "WXYZ ")
+    assert s["added"] == 1 and s["model"] == "1/claude-sonnet-5-5" and s["model_label"] == "Sonnet 5.5 · Claude"
+    assert s["connections"][0]["key"] == "…WXYZ" and "sk-ant" not in json.dumps(s)
+    assert not s["ready"] and not chat.allowed(OWNER, False)                  # still off
     assert (chat.config.DATA / "chat.json").stat().st_mode & 0o777 == 0o600
-    assert chat.allowed(OWNER, False) and chat.allowed(None, True) and not chat.allowed(GUEST, False)
+    s = chat.set_settings(on=True)
+    assert s["ready"] and chat.allowed(OWNER, False) and chat.allowed(None, True) and not chat.allowed(GUEST, False)
     chat.set_settings(everyone=True)
     assert chat.allowed(GUEST, False) and not chat.allowed(None, False)
-    chat.set_settings(engine="claude")
-    assert not chat.settings()["ready"]                                        # the token is separate
-    chat.set_settings(api_key="")
-    assert chat.settings()["api_key"] is None
+
+    s = chat.add_connection(preset="ollama", name="  My   box ")
+    assert s["added"] == 2 and s["model"] == "1/claude-sonnet-5-5"           # a second one doesn't change the model
+    assert s["connections"][1] == {"id": 2, "preset": "ollama", "name": "My box", "key": None,
+                                   "base_url": "http://host.docker.internal:11434/v1"}
+    with pytest.raises(chat.Refused):
+        chat.set_settings(model="9/llama")                                     # no such connection
+    with pytest.raises(chat.Refused):
+        chat.set_settings(model="2/has space")
+    s = chat.set_settings(model="2/llama3.3:70b", model_name="Llama 3.3")
+    assert s["ready"] and s["model_label"] == "Llama 3.3 · My box"
+    s = chat.edit_connection(2, base_url="http://10.0.0.5:11434/v1/", name="")
+    assert s["connections"][1]["base_url"] == "http://10.0.0.5:11434/v1" and s["connections"][1]["name"] == "Ollama"
+    s = chat.edit_connection(1, api_key="")                                      # an empty key keeps the one there
+    assert s["connections"][0]["key"] == "…WXYZ"
+    s = chat.delete_connection(2)
+    assert s["model"] == "" and not s["ready"] and not chat.allowed(OWNER, False) and len(s["connections"]) == 1
+
+
+def test_old_settings_carry_over(db):
+    token = "sk-ant-oat01-" + "t" * 40
+    (chat.config.DATA / "chat.json").write_text(json.dumps(
+        {"engine": "off", "api_key": "", "token": token, "model": "claude-opus-5-5", "everyone": True}))
+    s = chat.settings()
+    assert s["connections"] == [{"id": 1, "preset": "claude_code", "name": "Claude Code", "key": "…tttt", "base_url": ""}]
+    assert s["model"] == "1/claude-opus-5-5" and s["everyone"] and not s["on"]
+    conn, model = chat._usable({**chat._read(), "on": True})
+    assert conn["api_key"] == token and model == "claude-opus-5-5"
+    (chat.config.DATA / "chat.json").write_text(json.dumps(
+        {"engine": "api", "api_key": "sk-ant-api03-" + "k" * 30, "token": token, "model": "claude-sonnet-5-5"}))
+    s = chat.settings()
+    assert [c["preset"] for c in s["connections"]] == ["claude_code", "anthropic"] and s["model"] == "2/claude-sonnet-5-5"
+    assert s["on"] and s["ready"]
 
 
 def test_chats(db):
@@ -123,7 +159,8 @@ def usage():
 
 
 def test_answer_with_api_key(db, monkeypatch):
-    chat.set_settings(engine="api", api_key="sk-ant-api03-" + "x" * 30)
+    chat.add_connection(preset="anthropic", api_key="sk-ant-api03-" + "x" * 30)
+    chat.set_settings(on=True)
     script = [
         (["Let me look."], NS(stop_reason="tool_use", usage=usage(), content=[
             NS(type="text", text="Let me look."), NS(type="tool_use", id="tu1", name="search", input={"query": "רקיע"})])),
@@ -172,7 +209,8 @@ def test_answer_with_api_key(db, monkeypatch):
 
 
 def test_errors_and_limits(db, monkeypatch):
-    chat.set_settings(engine="api", api_key="sk-ant-api03-" + "x" * 30, everyone=True)
+    chat.add_connection(preset="anthropic", api_key="sk-ant-api03-" + "x" * 30)
+    chat.set_settings(on=True, everyone=True)
 
     async def failing(*a):
         yield ("text", "half an ans")
@@ -189,6 +227,7 @@ def test_errors_and_limits(db, monkeypatch):
     chat.start(GUEST["email"], c["id"], "q", False)                 # a new question stops the one before
     assert flag["stop"]
     chat._running.clear()
+    chat._lists.clear()
     db.executemany("insert into chat_msg(chat_id, role, text, at) values (?, 'user', 'q', strftime('%s','now'))",
                    [(c["id"],)] * chat.PER_DAY)
     with pytest.raises(chat.Refused, match="day"):
@@ -196,3 +235,111 @@ def test_errors_and_limits(db, monkeypatch):
     chat.start(OWNER["email"], chat.new_chat(OWNER["email"])["id"], "q", True)        # not the owner
     chat.forget(GUEST["email"])
     assert chat.chats(GUEST["email"]) == []
+
+
+# ---------- the OpenAI chat format (OpenRouter and the rest), against a stand-in ----------
+
+import httpx  # noqa: E402
+
+
+def sse(*chunks) -> bytes:
+    return "".join(f"data: {json.dumps(c, ensure_ascii=False)}\n\n" for c in chunks).encode() + b"data: [DONE]\n\n"
+
+
+def stand_in(monkeypatch, handler):
+    monkeypatch.setattr(chat, "_transport", httpx.MockTransport(handler))
+
+
+def test_models_listed(db, monkeypatch):
+    chat.add_connection(preset="openrouter", api_key="sk-or-v1-" + "o" * 40)
+    chat.add_connection(preset="gemini", api_key="AIza" + "g" * 30)
+    chat.add_connection(preset="claude_code", api_key="sk-ant-oat01-" + "t" * 40)
+    asked = []
+
+    def handler(req):
+        asked.append((str(req.url), req.headers.get("authorization"), req.headers.get("x-title")))
+        if "openrouter" in str(req.url):
+            return httpx.Response(200, json={"data": [
+                {"id": "b/thinks", "name": "B: Thinks", "supported_parameters": ["tools", "reasoning"],
+                 "reasoning": {"supported_efforts": ["low", "high"]}},
+                {"id": "a/plain", "name": "A: Plain", "supported_parameters": ["tools"]},
+                {"id": "c/no-tools", "name": "C", "supported_parameters": ["temperature"]}]})
+        if req.headers.get("authorization") == "Bearer AIza" + "g" * 30:
+            return httpx.Response(200, json={"data": [{"id": "models/gemini-x"}]})
+        return httpx.Response(401, json={"error": {"message": "bad key"}})
+
+    stand_in(monkeypatch, handler)
+    got = asyncio.run(chat.models(1))
+    assert [m["id"] for m in got] == ["a/plain", "b/thinks"] and got[0]["reasoning"] is None
+    assert asked[0] == ("https://openrouter.ai/api/v1/models", "Bearer sk-or-v1-" + "o" * 40, "Tamlil")
+    assert asyncio.run(chat.models(1)) is got and len(asked) == 1                 # kept for an hour
+    assert asyncio.run(chat.models(2)) == [{"id": "gemini-x", "name": "gemini-x"}]
+    assert [m["id"] for m in asyncio.run(chat.models(3))] == list(chat.MODELS)
+    chat.edit_connection(2, api_key="AIza" + "w" * 30)
+    with pytest.raises(chat.Refused, match="key"):
+        asyncio.run(chat.models(2))
+
+
+def test_answer_through_openrouter(db, monkeypatch):
+    chat.add_connection(preset="openrouter", api_key="sk-or-v1-" + "o" * 40)
+    chat.set_settings(on=True, model="1/b/thinks", model_name="B: Thinks")
+    chat._lists[1] = (time.time(), [{"id": "b/thinks", "name": "B: Thinks", "reasoning": {"supported_efforts": ["low", "high"]}}])
+    bodies = []
+    rounds = [
+        sse({"choices": [{"delta": {"content": "Let me look.", "reasoning_details": [{"type": "reasoning.text", "text": "Think", "index": 0}]}}]},
+            {"choices": [{"delta": {"reasoning_details": [{"type": "reasoning.text", "text": "ing", "signature": "sig", "index": 0}],
+                                    "tool_calls": [{"index": 0, "id": "c1", "type": "function", "function": {"name": "search", "arguments": '{"que'}}]}}]},
+            {"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"arguments": 'ry": "רקיע"}'}}]}, "finish_reason": "tool_calls"}]},
+            {"choices": [], "usage": {"prompt_tokens": 10, "completion_tokens": 5, "cost": 0.002}}),
+        sse({"choices": [{"delta": {"content": "It's in "}}]},
+            {"choices": [{"delta": {"content": "[0:10](#a1@0:10)."}, "finish_reason": "stop"}], "usage": {"cost": 0.003}}),
+    ]
+
+    def handler(req):
+        bodies.append(json.loads(req.content))
+        assert str(req.url) == "https://openrouter.ai/api/v1/chat/completions"
+        return httpx.Response(200, content=rounds.pop(0), headers={"content-type": "text/event-stream"})
+
+    stand_in(monkeypatch, handler)
+    c = chat.new_chat(OWNER["email"])
+    out = run(chat.answer(OWNER["email"], *chat.start(OWNER["email"], c["id"], "Where is the רקיע named?", True)))
+    assert [k for k, _ in out] == ["start", "text", "tool", "text", "text", "done"]
+    assert out[2][1] == {"what": "search", "arg": "רקיע"} and out[-1][1]["text"] == "It's in [0:10](#a1@0:10)."
+
+    first, second = bodies
+    assert first["model"] == "b/thinks" and first["stream"] and first["reasoning"] == {"effort": "high"}
+    assert first["stream_options"] == {"include_usage": True} and "tool_choice" not in first
+    assert [t["function"]["name"] for t in first["tools"]] == ["search", "transcript", "videos"]
+    assert "additionalProperties" not in first["tools"][0]["function"]["parameters"]
+    assert first["messages"][0]["role"] == "system" and "library's channels" in first["messages"][0]["content"]
+    assert first["messages"][1] == {"role": "user", "content": "Where is the רקיע named?"}
+    said, result = second["messages"][2], second["messages"][3]
+    assert said["tool_calls"] == [{"id": "c1", "type": "function", "function": {"name": "search", "arguments": '{"query": "רקיע"}'}}]
+    assert said["content"] == "Let me look." and said["reasoning_details"] == [
+        {"type": "reasoning.text", "text": "Thinking", "signature": "sig", "index": 0}]
+    assert result["role"] == "tool" and result["tool_call_id"] == "c1" and "a1 · בריאת הרקיע" in result["content"]
+
+    row = db.execute("select engine, model, cost from chat_msg where role='assistant'").fetchone()
+    assert (row["engine"], row["model"]) == ("openrouter", "b/thinks") and row["cost"] == pytest.approx(0.005)
+
+
+def test_openai_format_turned_down(db, monkeypatch):
+    chat.add_connection(preset="custom", base_url="http://llm.local/v1")
+    chat.set_settings(on=True, model="1/small")
+    bodies, replies = [], [
+        httpx.Response(400, json={"error": {"message": "unknown field stream_options"}}),
+        httpx.Response(200, content=sse({"choices": [{"delta": {"content": "Hi."}, "finish_reason": "stop"}]})),
+        httpx.Response(404, json={"error": {"message": "No endpoints found that support tool use"}}),
+    ]
+
+    def handler(req):
+        bodies.append(json.loads(req.content))
+        assert "authorization" not in req.headers
+        return replies.pop(0)
+
+    stand_in(monkeypatch, handler)
+    c = chat.new_chat(OWNER["email"])
+    out = run(chat.answer(OWNER["email"], *chat.start(OWNER["email"], c["id"], "Hello", True)))
+    assert out[-1][1]["text"] == "Hi." and "stream_options" in bodies[0] and "stream_options" not in bodies[1]
+    out = run(chat.answer(OWNER["email"], *chat.start(OWNER["email"], c["id"], "Again", True)))
+    assert ("error", {"code": "tools"}) in out

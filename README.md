@@ -39,6 +39,7 @@ So Tamlil (תמליל, Hebrew for a transcript) keeps an eye on the few channels
 - **Share and export:** a link to a transcript that anyone can open, and every transcript as text, subtitles (`.srt`, `.vtt`) or JSON, one video or a whole channel. See [Watching](docs/watching.md#sharing-and-exporting).
 - **Pause a channel:** it keeps everything it has and the worker skips it, until it's picked up again.
 - **Invite only:** I invite people by email, or they ask for an invite and I say yes. They sign in with a code by email or a password, and Settings has their account. See [Signing in, people and Settings](docs/people.md).
+- **Themes:** fourteen of them, each light and dark, picked per device in Settings. See [Settings](docs/people.md#settings).
 
 ## Screenshots
 
@@ -48,7 +49,7 @@ So Tamlil (תמליל, Hebrew for a transcript) keeps an eye on the few channels
 
 <img src="docs/images/library.png" alt="The Library: three sources with their language, range, how much is searchable, how many went through Whisper, and their state, with one paused, then Add">
 
-<img src="docs/images/settings.png" alt="Settings: the account with its name, username, email and password, Chat answered by Claude Code, then People with two requests to approve or decline">
+<img src="docs/images/settings.png" alt="Settings: the account with its name, username, email and password, Appearance with the theme and the mode, and Chat answered by Claude Code">
 
 <p align="center"><img src="docs/images/phone.png" width="320" alt="Searching רקיע on a phone"> <img src="docs/images/email.png" width="320" alt="The invite email, in Tamlil's colors"></p>
 

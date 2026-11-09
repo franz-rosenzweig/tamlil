@@ -36,9 +36,18 @@ I get an email about each request, and when I say yes, they get one that says th
 - **Sign out everywhere else** signs out every other browser and phone, and keeps this one.
 - **Sign out.**
 
+**Appearance** is there for everyone, the tailnet too:
+
+- **Theme** is Tamlil's colors, picked from a list: Tamlil's own, then Paper, Blue pencil, Nord, Solarized, Gruvbox, Catppuccin, Rosé Pine, Tokyo Night, Dracula, Everforest, E-ink, High contrast and Black. It changes as soon as you pick one, and every theme has a light and a dark version, with the highlight in its own yellow.
+- **Mode** is **Auto** (light or dark with the device), **Light** or **Dark**.
+
+Both are kept in the browser, so the phone and the computer can each have their own.
+
+![Six of the themes on the same search: Tamlil dark, Paper, Nord dark, Solarized, Dracula dark and Everforest](images/themes.png)
+
 The owner also sees **Chat** there, which is where chat is turned on (see [Chat](chat.md#turning-it-on)).
 
-![Settings: the account, Chat answered by Claude Code, then People with two requests waiting](images/settings.png)
+![Settings: the account, Appearance with the theme and the mode, and Chat answered by Claude Code](images/settings.png)
 
 ## People, for the owner
 

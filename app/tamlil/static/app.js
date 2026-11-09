@@ -290,6 +290,7 @@ async function viewSettings() {
   $('#main').innerHTML = `
     <div class="lib-head"><h2>Settings</h2></div>
     ${ME.email ? accountHTML() : ''}
+    ${lookHTML()}
     ${cset ? chatSetHTML(cset) : ''}
     ${ppl ? peopleHTML(ppl) : ''}
     ${shares.length ? `<section class="add set"><h3>Shared links</h3><div class="tablewrap"><table class="lib ppl"><tbody>${shares.map(x => `<tr>
@@ -299,7 +300,26 @@ async function viewSettings() {
       <td class="actions"><div class="acts"><button class="btn small" data-copy="${esc(x.url)}">Copy</button><button class="icon" data-unshare="${esc(x.token)}" title="Stop sharing" aria-label="Stop sharing">✕</button></div></td>
     </tr>`).join('')}</tbody></table></div></section>` : ''}`;
   wireSettings(ppl);
+  wireLook();
   if (cset) wireChatSet();
+}
+// The theme is per device (themes.js keeps it), so it's here for everyone, the tailnet too.
+function lookHTML() {
+  const TH = window.TamlilThemes, cur = TH.get();
+  return `<section class="add set" id="lookset">
+    <h3>Appearance</h3>
+    <div class="setrow"><span class="lbl">Theme</span><select id="t-look">${TH.FAMILIES.map(f => `<option value="${f.id}" ${f.id === cur.look ? 'selected' : ''}>${esc(f.name)}</option>`).join('')}</select></div>
+    <div class="setrow"><span class="lbl">Mode</span><div class="seg" role="group" aria-label="Mode">${[['auto', 'Auto'], ['light', 'Light'], ['dark', 'Dark']].map(([v, l]) =>
+      `<button type="button" data-mode="${v}" aria-pressed="${cur.mode === v}">${l}</button>`).join('')}</div></div>
+  </section>`;
+}
+function wireLook() {
+  const TH = window.TamlilThemes;
+  $('#t-look').onchange = e => TH.set({look: e.target.value});
+  $$('[data-mode]').forEach(b => b.onclick = () => {
+    TH.set({mode: b.dataset.mode});
+    $$('[data-mode]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+  });
 }
 function chatSetHTML(s) {
   const seg = (key, opts, cur) => `<div class="seg" role="group">${opts.map(([v, l]) => `<button type="button" data-cset="${key}" data-v="${v}" aria-pressed="${cur === v}">${l}</button>`).join('')}</div>`;

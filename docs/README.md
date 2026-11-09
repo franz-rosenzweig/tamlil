@@ -13,7 +13,7 @@ These pages are how Tamlil works, written down. It searches YouTube videos by wh
 - [Searching](searching.md): the search box, the results, and how Hebrew words match
 - [Watching](watching.md): the player, the transcript, stepping through the matches, and sharing and exporting
 - [Chat](chat.md): asking Claude about the videos, and turning it on with an API key or Claude Code
-- [Signing in, people and Settings](people.md): codes and passwords, your account, inviting people and asking for an invite
+- [Signing in, people and Settings](people.md): codes and passwords, your account, themes, inviting people and asking for an invite
 
 ### Under the hood
 - [How it works](how-it-works.md): captions or Whisper, the index, the VPN and the player

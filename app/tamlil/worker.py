@@ -22,6 +22,7 @@ LIST_BATCH = 10     # new videos per listing pass; their transcripts come before
 MAX_ATTEMPTS = 3
 BLOCK_WAIT = 30 * 60      # how long to leave YouTube alone after it turns this address away
 SWITCH_GAP = 10 * 60      # at most one VPN server change in this long
+OFFLINE_WAIT = 2 * 60     # how long to wait when nothing gets through the VPN
 
 
 class Paused(Exception):
@@ -36,28 +37,62 @@ def _kv(db, key, value=None):
                (key, str(value)))
 
 
-def _new_address() -> bool:
-    """Ask gluetun to reconnect, which picks another server, and wait for the new address."""
+def _gluetun(method: str, path: str, **kw) -> dict:
+    """One call to gluetun's control server, each on a fresh connection, tried three times.
+    (Reusing the connection once failed between "stop" and "start", and left the VPN off all night.)"""
     import httpx
 
-    url, head = config.GLUETUN_URL, {"X-API-Key": config.GLUETUN_KEY}
+    for i in range(3):
+        try:
+            r = httpx.request(method, f"{config.GLUETUN_URL}{path}", timeout=20,
+                              headers={"X-API-Key": config.GLUETUN_KEY}, **kw)
+            r.raise_for_status()
+            return r.json()
+        except (httpx.HTTPError, ValueError):
+            if i == 2:
+                raise
+            time.sleep(2)
+    return {}
+
+
+def _vpn_on() -> bool:
+    """Make sure gluetun's VPN is running. True when it is (or was just started)."""
+    import httpx
+
     try:
-        with httpx.Client(timeout=20, headers=head) as c:
-            before = c.get(f"{url}/v1/publicip/ip").json().get("public_ip")
-            c.put(f"{url}/v1/vpn/status", json={"status": "stopped"}).raise_for_status()
-            time.sleep(3)
-            c.put(f"{url}/v1/vpn/status", json={"status": "running"}).raise_for_status()
-            for _ in range(30):
-                time.sleep(4)
-                try:
-                    now = c.get(f"{url}/v1/publicip/ip").json().get("public_ip")
-                except (httpx.HTTPError, ValueError):
-                    continue
-                if now and now != before:
-                    log.info("new VPN address")
-                    return True
+        if _gluetun("GET", "/v1/vpn/status").get("status") in ("running", "starting"):
+            return True
+        log.warning("the VPN was off; starting it")
+        _gluetun("PUT", "/v1/vpn/status", json={"status": "running"})
+        return True
+    except (httpx.HTTPError, ValueError) as e:
+        log.warning("couldn't reach gluetun: %s", e)
+        return False
+
+
+def _new_address() -> bool:
+    """Ask gluetun to reconnect, which picks another server, and wait for the new address.
+    Whatever happens, the VPN is left running."""
+    import httpx
+
+    before = None
+    try:
+        before = _gluetun("GET", "/v1/publicip/ip").get("public_ip")
+        _gluetun("PUT", "/v1/vpn/status", json={"status": "stopped"})
+        time.sleep(3)
     except (httpx.HTTPError, ValueError) as e:
         log.warning("couldn't change the VPN server: %s", e)
+    if not _vpn_on():
+        return False
+    for _ in range(30):
+        time.sleep(4)
+        try:
+            now = _gluetun("GET", "/v1/publicip/ip").get("public_ip")
+        except (httpx.HTTPError, ValueError):
+            continue
+        if now and now != before:
+            log.info("new VPN address")
+            return True
     return False
 
 
@@ -74,13 +109,35 @@ def _blocked(db, err) -> None:
     _kv(db, "blocked_until", now + BLOCK_WAIT)
 
 
+def _offline(db, err) -> None:
+    """Nothing got through the VPN. That's no video's fault either: count nothing, make sure the
+    VPN is on, and try again in a couple of minutes."""
+    log.warning("no connection through the VPN: %s", _short(err))
+    if config.GLUETUN_URL and config.GLUETUN_KEY:
+        _vpn_on()
+    _kv(db, "offline_until", time.time() + OFFLINE_WAIT)
+
+
+def _not_their_fault(db, err) -> bool:
+    """YouTube turning us away, or no connection at all: handle it and return True."""
+    if fetch.blocked(err):
+        _blocked(db, err)
+        return True
+    if fetch.offline(err):
+        _offline(db, err)
+        return True
+    return False
+
+
 def held(db) -> bool:
-    """True while the worker is leaving YouTube alone."""
-    until = float(_kv(db, "blocked_until") or 0)
-    if until <= time.time():
-        return False
-    set_status(db, doing="blocked", until=until)
-    return True
+    """True while the worker is leaving YouTube alone, or waiting for the VPN."""
+    now = time.time()
+    for key, doing in (("blocked_until", "blocked"), ("offline_until", "offline")):
+        until = float(_kv(db, key) or 0)
+        if until > now:
+            set_status(db, doing=doing, until=until)
+            return True
+    return False
 
 
 def _short(err: BaseException) -> str:
@@ -113,9 +170,9 @@ def refresh_due(db) -> bool:
         else:
             db.execute("update source set state='ok', error=null, checked_at=datetime('now') where id=?", (src["id"],))
     except Exception as e:  # noqa: BLE001
-        if fetch.blocked(e):          # not the source's fault: it's listed again once YouTube lets us
+        if fetch.blocked(e) or fetch.offline(e):    # not the source's fault: it's listed again later
             db.execute("update source set state=? where id=?", (src["state"], src["id"]))
-            _blocked(db, e)
+            _not_their_fault(db, e)
             return True
         log.warning("listing %s failed: %s", src["url"], e)
         db.execute(
@@ -151,7 +208,7 @@ def _list_source(db, src, continuing=False) -> bool:
         try:
             info = fetch.video_info(e["id"])
         except Exception as err:  # noqa: BLE001
-            if fetch.blocked(err):
+            if fetch.blocked(err) or fetch.offline(err):
                 raise
             msg = _short(err)
             state = "skipped" if any(w in msg.lower() for w in ("private", "members", "unavailable", "removed")) else "error"
@@ -205,9 +262,9 @@ def process_next(db) -> bool:
         log.info("paused partway through %s", v["id"])
         db.execute("update video set state='new', updated_at=datetime('now') where id=?", (v["id"],))
     except Exception as e:  # noqa: BLE001
-        if fetch.blocked(e):          # the video's fine: it stays as it was, with no attempt counted
+        if fetch.blocked(e) or fetch.offline(e):    # the video's fine: it stays as it was, no attempt counted
             db.execute("update video set state=? where id=?", (v["state"], v["id"]))
-            _blocked(db, e)
+            _not_their_fault(db, e)
             return True
         log.warning("video %s failed: %s\n%s", v["id"], e, traceback.format_exc())
         db.execute(
@@ -313,6 +370,20 @@ def update_ytdlp(db) -> None:
         sys.exit(0)
 
 
+def restarted(db) -> None:
+    """A video still marked transcribing means the worker stopped partway through it (a restart,
+    or running out of memory). That counts as a try, so one video can't keep the worker going
+    round in circles: after the third it's an Error with a Retry button."""
+    db.execute(
+        f"""update video set attempts=attempts+1,
+               state=case when attempts+1 >= {MAX_ATTEMPTS} then 'error' else 'new' end,
+               error=case when attempts+1 >= {MAX_ATTEMPTS} then 'Stopped partway through, {MAX_ATTEMPTS} times'
+                          else error end,
+               retry_at=0, updated_at=datetime('now')
+           where state='transcribing'"""
+    )
+
+
 def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -322,7 +393,7 @@ def main():
         pass
     db = connect()
     config.TMP.mkdir(parents=True, exist_ok=True)
-    db.execute("update video set state='new' where state='transcribing'")
+    restarted(db)
     db.execute("update source set state='new' where state='listing'")
     log.info("worker up; proxy=%s threads=%s", bool(config.PROXY), config.WHISPER_THREADS)
     while True:

@@ -83,3 +83,76 @@ def test_a_video_listed_without_details_still_gets_its_range_checked(tmp_path, m
     db.execute("insert into video(id, source_id, state, attempts, retry_at) values ('old', 1, 'error', 1, 0)")
     assert worker.process_next(db)
     assert db.execute("select state from video").fetchone()[0] == "out_of_range"
+
+
+PROXY = ("ERROR: [youtube] abc: Unable to download API page: ('Unable to connect to proxy', "
+         "OSError('Tunnel connection failed: 503 Service Unavailable'))")
+
+
+def test_no_connection_through_the_vpn_counts_nothing_and_turns_it_on(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA", tmp_path)
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "t.db")
+    monkeypatch.setattr(config, "GLUETUN_URL", "http://gluetun:8000")
+    monkeypatch.setattr(config, "GLUETUN_KEY", "k")
+    calls = []
+
+    def gluetun(method, path, **kw):
+        calls.append((method, kw.get("json")))
+        return {"status": "stopped"}
+    monkeypatch.setattr(worker, "_gluetun", gluetun)
+
+    def down(*a):
+        raise RuntimeError(PROXY)
+    monkeypatch.setattr(fetch, "list_entries", down)
+    monkeypatch.setattr(fetch, "video_info", down)
+    db = dbm.connect()
+    db.execute("insert into source(url, lang) values ('https://www.youtube.com/@chan', 'en')")
+
+    assert worker.refresh_due(db)
+    assert db.execute("select state, error from source").fetchone()[:] == ("new", None)
+    assert worker.held(db) and dbm.get_status(db)["doing"] == "offline"
+    assert ("PUT", {"status": "running"}) in calls
+
+    db.execute("delete from kv where key='offline_until'")
+    db.execute("update source set state='ok', checked_at=datetime('now')")
+    db.execute("insert into video(id, source_id, state, tracks) values ('w', 1, 'new', null)")
+    assert worker.process_next(db)
+    assert db.execute("select state, attempts, error from video").fetchone()[:] == ("new", 0, None)
+
+
+def test_changing_server_always_leaves_the_vpn_on(monkeypatch):
+    monkeypatch.setattr(worker.time, "sleep", lambda s: None)
+    calls, state = [], {"vpn": "running"}
+
+    def gluetun(method, path, **kw):
+        import httpx
+        calls.append((method, path, kw.get("json")))
+        if method == "PUT" and kw["json"]["status"] == "stopped":
+            state["vpn"] = "stopped"
+            raise httpx.RemoteProtocolError("Server disconnected without sending a response.")
+        if method == "PUT":
+            state["vpn"] = "running"
+        if path == "/v1/vpn/status":
+            return {"status": state["vpn"]}
+        return {"public_ip": "1.1.1.1" if len(calls) < 3 else "2.2.2.2"}
+    monkeypatch.setattr(worker, "_gluetun", gluetun)
+
+    assert worker._new_address()
+    assert state["vpn"] == "running"
+
+
+def test_a_video_that_keeps_stopping_the_worker_gives_up_after_three(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA", tmp_path)
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "t.db")
+    db = dbm.connect()
+    db.execute("insert into source(url, lang) values ('https://www.youtube.com/@chan', 'en')")
+    db.execute("insert into video(id, source_id, state) values ('long', 1, 'transcribing')")
+    row = lambda: db.execute("select state, attempts, error from video").fetchone()[:]
+
+    worker.restarted(db)
+    assert row() == ("new", 1, None)
+    db.execute("update video set state='transcribing'")
+    worker.restarted(db)
+    db.execute("update video set state='transcribing'")
+    worker.restarted(db)
+    assert row() == ("error", 3, "Stopped partway through, 3 times")

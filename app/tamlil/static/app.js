@@ -806,6 +806,7 @@ async function pollWorker() {
     else if (!w.doing || w.doing === 'idle') el.textContent = 'Idle';
     else if (w.doing === 'blocked') { el.className = 'worker bad'; el.textContent = `Blocked by YouTube until ${new Date(w.until * 1000).toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'})}`; }
     else if (w.doing === 'switching') el.textContent = 'Changing VPN server';
+    else if (w.doing === 'offline') { el.className = 'worker bad'; el.textContent = 'VPN down'; }
     else {
       const pct = w.doing === 'transcribing' && w.progress != null ? ` ${Math.round(w.progress * 100)}%` : '';
       el.textContent = `${DOING[w.doing] || w.doing}${pct} · `;

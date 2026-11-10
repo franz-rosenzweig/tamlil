@@ -29,7 +29,7 @@ The worker goes through the source newest first, 10 videos at a time, and gets t
 
 Every 6 hours it looks at each channel and playlist again for new videos. On a channel that's quick, because it stops as soon as it sees 5 in a row that it already has. A single video is only looked at once.
 
-Now and then YouTube turns the VPN away for a while, asking it to "confirm you're not a bot" or saying it's had too many requests. That's not the videos' fault, so none of them is counted as failed. The worker moves to another VPN server and carries on, and if it only just did that, it leaves YouTube alone for half an hour. Meanwhile the top of the page says **Blocked by YouTube until** the time it tries again.
+Now and then YouTube turns the VPN away for a while, asking it to "confirm you're not a bot" or saying it's had too many requests. That's not the videos' fault, so none of them is counted as failed. The worker moves to another VPN server and carries on, and if it only just did that, it leaves YouTube alone for half an hour. Meanwhile the top of the page says **Blocked by YouTube until** the time it tries again. If the VPN itself is down, it says **VPN down**, and again nothing counts as failed: the worker switches the VPN back on and carries on.
 
 ## The table
 

@@ -34,6 +34,12 @@ def blocked(err: BaseException) -> bool:
     return "not a bot" in msg or "http error 429" in msg or "too many requests" in msg
 
 
+def offline(err: BaseException) -> bool:
+    """Nothing got through the VPN's proxy at all (the VPN is down or between servers)."""
+    msg = str(err).lower()
+    return "unable to connect to proxy" in msg or "tunnel connection failed" in msg
+
+
 def lang_code(code: str | None) -> str | None:
     """YouTube writes Hebrew as 'iw'. Keep the base language only."""
     if not code:

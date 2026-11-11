@@ -22,6 +22,8 @@ Every line has its time, and clicking the time jumps the player there. The lines
 
 **Find** looks for any text in this one transcript as you type, ignoring niqqud, and highlights it. The count next to it says how many lines have it.
 
+**Pin video** keeps the video in view while you read and scroll the transcript. On a wide screen the transcript moves beside the video, and on a phone the video stays at the top with the lines scrolling under it. Click it again to put things back. Tamlil remembers the choice on each device.
+
 ## Sharing and exporting
 
 **Share** makes a link to this video's transcript that anyone can open, even without an account. It opens a plain page with the video (from YouTube itself), the whole transcript and Find. With **At 1:04** ticked, the link starts at the moment you're on, and that line is marked. **Copy** copies it, **Send…** (on a phone) opens the phone's own share sheet, and **Copy YouTube link** copies YouTube's link at the same moment.

@@ -132,10 +132,13 @@ async function viewVideo(id, params) {
   const v = data.video, segs = data.segments, hits = new Map(data.hits.map(h => [h.idx, h]));
   const hitTimes = segs.filter(s => hits.has(s.idx)).map(s => s.start_ms);
   let now = t;
+  const pinned = (() => { try { return localStorage.getItem('tamlil.pin') === '1'; } catch { return false; } })();
+  document.documentElement.style.setProperty('--top-h', ($('.top')?.offsetHeight || 57) + 'px');
   $('#main').innerHTML = `
     ${q ? `<button class="back" id="back">← <bdi>${esc(q)}</bdi></button>` : ''}
+    <div class="vview${pinned ? ' side' : ''}" id="vview">
     <div class="vgrid">
-      <div>
+      <div class="vplay">
         <div class="player"><iframe id="frame" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen src="${embed(id, t)}"></iframe></div>
         ${v.duration && hitTimes.length ? `<div class="scrub" dir="ltr"><div class="rail"></div>${hitTimes.map(ms =>
           `<button class="tk" data-seek="${ms}" style="left:${Math.min(100, ms / 10 / v.duration).toFixed(2)}%" title="${fmt(ms)}"></button>`).join('')}</div>` : ''}
@@ -168,8 +171,11 @@ async function viewVideo(id, params) {
         </div>
       </div>
     </div>
-    <div class="tbar"><input type="search" id="find" dir="auto" placeholder="Find" aria-label="Find in transcript"><span class="count" id="tcount">${segs.length} lines</span></div>
-    <ol class="tlines" id="tlines"></ol>`;
+    <div class="vtext">
+      <div class="tbar"><input type="search" id="find" dir="auto" placeholder="Find" aria-label="Find in transcript"><span class="count" id="tcount">${segs.length} lines</span><button class="btn small" id="pin" aria-pressed="${pinned}">Pin video</button></div>
+      <ol class="tlines" id="tlines"></ol>
+    </div>
+    </div>`;
   const back = $('#back'); if (back) back.addEventListener('click', () => go(searchHash({q})));
   const strip = s => s.normalize('NFD').replace(/[֑-ׇ]/g, '').toLowerCase();
   function lines(find) {
@@ -220,6 +226,12 @@ async function viewVideo(id, params) {
   const step = d => { if (!hitTimes.length) return; const n = d > 0 ? (hitTimes.find(x => x > now) ?? hitTimes[0]) : ([...hitTimes].reverse().find(x => x < now) ?? hitTimes.at(-1)); seek(n); };
   if ($('#prev')) { $('#prev').onclick = () => step(-1); $('#next').onclick = () => step(1); }
   $('#find').addEventListener('input', e => lines(e.target.value));
+  $('#pin').onclick = () => {
+    const on = !$('#vview').classList.contains('side');
+    $('#vview').classList.toggle('side', on); $('#pin').setAttribute('aria-pressed', String(on));
+    try { localStorage.setItem('tamlil.pin', on ? '1' : '0'); } catch {}
+    mark(true);
+  };
   lines('');
   if (t) { window.scrollTo(0, 0); mark(true, 'instant'); }      // opened at a moment (a search hit, a chat answer): show its line
 }

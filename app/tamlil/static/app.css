@@ -129,6 +129,20 @@ mark.k-find{box-shadow:0 0 0 1.5px var(--focus);padding:0 1px}
 .tl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:12px;padding:8px;border-bottom:1px solid var(--rule);border-inline-start:3px solid transparent;scroll-margin:90px}
 .tl.hit{background:var(--sunk);background:color-mix(in srgb,var(--cap) 13%,transparent)}
 .tl.now{border-inline-start-color:var(--ink)}
+/* Pin video: the player stays in view while the transcript scrolls (beside it on a wide screen, on top on a phone) */
+.btn[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.vview.side .vplay{position:sticky;top:var(--top-h,57px);z-index:4;background:var(--bg);padding:12px 0 8px;margin-top:-12px}
+.vview.side .vmeta{margin-top:14px}
+@media (min-width:901px){
+  main:has(.vview.side){max-width:1440px}
+  body:has(.vview.side) .top{padding-inline:max(16px,calc((100vw - 1440px)/2))}
+  .vview.side{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:28px}
+  .vview.side .vgrid{display:block}        /* as tall as the transcript, so the player can stay */
+  .vview.side .tbar{margin-top:0}
+}
+@media (max-width:900px){
+  .vview.side .vgrid{display:contents}     /* the player's box becomes the whole page, so it stays */
+}
 
 /* library */
 .lib-head{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:8px}

@@ -72,6 +72,15 @@ def list_entries(url: str):
     return kind, title, entries
 
 
+def spoken(info: dict) -> str | None:
+    """The language of the video's own audio. A dubbed video has an audio track for each language,
+    and YouTube's "language" can name one of the dubs (Arabic, for a whole English channel)."""
+    for f in info.get("formats") or []:
+        if f.get("language") and "original" in (f.get("format_note") or "").lower():
+            return f["language"]
+    return info.get("language")
+
+
 def video_info(video_id: str) -> dict:
     with yt_dlp.YoutubeDL(_opts(skip_download=True)) as y:
         info = y.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
@@ -85,7 +94,7 @@ def video_info(video_id: str) -> dict:
         "upload_date": info.get("upload_date"),
         "duration": info.get("duration"),
         "description": (info.get("description") or "")[:4000],
-        "language": lang_code(info.get("language")),
+        "language": lang_code(spoken(info)),
         "live_status": info.get("live_status"),
         "availability": info.get("availability"),
         "manual": manual,
@@ -105,7 +114,7 @@ def pick_track(lang: str | None, manual: list[str], auto: list[str]):
             lang = langs.pop()
         else:
             orig = [c for c in auto if c.endswith("-orig")]
-            if orig:
+            if len(orig) == 1:          # a dubbed video has one per dub, and then it says nothing
                 lang = lang_code(orig[0])
     if not lang:
         return None, None

@@ -296,7 +296,10 @@ def _process(db, v, work):
             db.execute("update video set state=?, error=null, updated_at=datetime('now') where id=?", (skip, v["id"]))
             return
         v = db.execute(PICK + " where video.id=?", (v["id"],)).fetchone()
-    lang = v["source_lang"] if v["source_lang"] in ("he", "en") else v["lang"]
+    # With Detect, YouTube's word for the language only picks the captions to try. If it comes to
+    # Whisper, Whisper listens for itself: forcing a wrong language turns the speech into nonsense.
+    detect = v["source_lang"] not in ("he", "en")
+    lang = v["lang"] if detect else v["source_lang"]
     title = v["title"] or v["id"]
 
     track, lang = fetch.pick_track(lang, tracks.get("manual", []), tracks.get("auto", []))
@@ -325,7 +328,8 @@ def _process(db, v, work):
 
     set_status(db, doing="transcribing", video=v["id"], title=title, progress=0, started=started,
                duration=v["duration"])
-    segments, lang, model = transcribe.transcribe(audio, lang, prompt=title, progress=progress)
+    segments, lang, model = transcribe.transcribe(audio, None if detect else lang, prompt=title,
+                                                  progress=progress)
     save_transcript(db, v["id"], segments, "whisper", model, lang)
     elapsed = time.time() - started
     if v["duration"]:

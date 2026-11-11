@@ -10,7 +10,7 @@ For each video, Tamlil takes the first of these it can get:
 2. **YouTube's automatic captions,** for English only. Its Hebrew ones aren't good enough to search.
 3. **Whisper,** on the server's CPU: ivrit.ai's model for Hebrew (Whisper large-v3-turbo, trained further on Hebrew), and Whisper large-v3-turbo for everything else.
 
-Translated caption tracks never count, since they're not what was said. If the source's language is Detect and the captions don't settle it, Whisper listens to 30 seconds from the middle of the video and decides.
+Translated caption tracks never count, since they're not what was said. If the source's language is Detect and the captions don't settle it, Whisper listens to 30 seconds from the middle of the video and decides. YouTube's own label for the language only decides which captions to look for, never what Whisper hears, because on a video YouTube has dubbed into other languages the label can name one of the dubs. For those, Tamlil goes by the language of the original audio track.
 
 Whisper runs at the lowest priority on 8 threads, with a beam of 5 and voice detection, and it leaves out the lines it makes up in silence and music (Whisper likes to "hear" things there). It takes about 25 minutes for an hour of Hebrew. Anything longer than half an hour goes through in pieces of about 20 minutes, each cut at a quiet moment so no word is split, because a long video in one go needs more memory than the worker has. Captions take a few seconds a video. For Whisper, only the audio is downloaded, at a low bitrate, and it's deleted as soon as the video is done.
 
